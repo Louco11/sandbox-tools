@@ -73,6 +73,7 @@ services:
       CONNECTOR_BOARDS_TOKEN: ${CONNECTOR_BOARDS_TOKEN:?run make env}
       CONNECTOR_PASTRY_TOKEN: ${CONNECTOR_PASTRY_TOKEN:?run make env}
       CONNECTOR_SUPPLIERS_TOKEN: ${CONNECTOR_SUPPLIERS_TOKEN:?run make env}
+      CONNECTOR_CARS_TOKEN: ${CONNECTOR_CARS_TOKEN:?run make env}
       GATEWAY_JWT_SECRET: ${GATEWAY_JWT_SECRET:?run make env}
       GATEWAY_ADMIN_TOKEN: ${GATEWAY_ADMIN_TOKEN:?run make env}
       GATEWAY_DEPLOY_TOKEN: ${GATEWAY_DEPLOY_TOKEN:?run make env}
@@ -293,6 +294,52 @@ services:
       retries: 20
     restart: unless-stopped
 
+  # Система «Автопарк»: своя база, как у настоящего источника. Песочница её не видит — только коннектор,
+  # и только в сети cars. Порт наружу не публикуется.
+  cars-db:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: fleet
+      POSTGRES_USER: fleet_admin
+      POSTGRES_PASSWORD: ${CARS_DB_PASSWORD:?run make env}
+      CARS_READ_PASSWORD: ${CARS_READ_PASSWORD:?run make env}
+    volumes:
+      - ./infra/cars-db/init:/docker-entrypoint-initdb.d:ro
+      - cars-data:/var/lib/postgresql/data
+    networks: [cars]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U fleet_admin -d fleet"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+    restart: unless-stopped
+
+  # Коннектор источника «Автопарк» (connectors/cars): между гейтвеем и базой автопарка.
+  connector-cars:
+    image: node:22-bookworm-slim
+    working_dir: /app
+    command: ["node", "--disable-warning=ExperimentalWarning", "connectors/cars/server.ts"]
+    depends_on:
+      cars-db:
+        condition: service_healthy
+    environment:
+      CONNECTOR_TOKEN: ${CONNECTOR_CARS_TOKEN:?run make env}
+      DB_HOST: cars-db
+      DB_NAME: fleet
+      DB_READ_USER: cars_read
+      DB_READ_PASSWORD: ${CARS_READ_PASSWORD:?run make env}
+    volumes:
+      - ./connectors/cars:/app/connectors/cars:ro
+      - ./packages/connector:/app/packages/connector:ro
+      - ./node_modules:/app/node_modules:ro
+    networks: [sources, cars]
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://localhost:8080/healthz').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
   # Принудительная смертность: удаляет контейнеры истёкших и отозванных тулов.
   reaper:
     image: node:22-bookworm-slim
@@ -478,6 +525,9 @@ networks:
     internal: true
   sources:
     internal: true
+  # Сеть до базы автопарка: в ней только коннектор и сама база.
+  cars:
+    internal: true
   edge: {}
   ci: {}
 
@@ -490,3 +540,4 @@ volumes:
   identity-state: {}
   keycloak-data: {}
   suppliers-data: {}
+  cars-data: {}

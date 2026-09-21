@@ -67,6 +67,10 @@ ensure NOTIFY_DEPLOYER_TOKEN "$(secret 24)"
 ensure NOTIFY_PORTAL_TOKEN "$(secret 24)"    # главная: входящие человека
 # Деплоер читает репозиторий и пишет статус выкатки коммита.
 # Вход в Gitea через тот же IdP (шаг Б6): клиент конфиденциальный, секрет живёт только на сервере.
+# Источник «Автопарк»: своя база и токен коннектора (шаг «подключение источника»).
+ensure CARS_DB_PASSWORD "$(secret)"
+ensure CARS_READ_PASSWORD "$(secret)"
+ensure CONNECTOR_CARS_TOKEN "$(secret 20)"
 ensure GITEA_OIDC_SECRET "$(secret 24)"
 ensure GITEA_DEPLOYER_USER sandbox-deployer
 ensure GITEA_DEPLOYER_PASSWORD "$(secret 16)"

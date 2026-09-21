@@ -1,0 +1,29 @@
+# ЧЕРНОВИК записи в реестр — предложение агента, а не решение. Одобряют ИБ и владелец данных: переносят в
+# registry/sources.yaml (approved_by — кто одобрил), заводят токен (infra/init-env.sh) и сервис коннектора
+# (docker-compose.yml, сеть sources + сеть только до базы автопарка).
+#
+# Система: отдельная база Postgres «Автопарк» (cars-db). Только чтение: цену и пробег правят в учётной
+# системе, через песочницу их менять нечем. Прав записи в черновике нет — добавлять их отдельным решением.
+sources:
+  cars-readonly:
+    title: Автопарк — машины компании и их цена
+    owner: doronec
+    approved_by: не одобрено
+    approved_at: не одобрено
+    kind: connector
+    connector:
+      url: http://connector-cars:8080
+      token_env: CONNECTOR_CARS_TOKEN
+    datasets:
+      cars:
+        description: "Машины автопарка: марка, модель, год, цена по последней оценке, пробег, город, статус"
+        fields:
+          id: public
+          brand: public
+          model: public
+          year: public
+          price_rub: internal
+          mileage_km: internal
+          city: internal
+          status: internal
+          updated_at: internal

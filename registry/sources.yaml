@@ -224,6 +224,29 @@ sources:
 # Права на запись. Каждое — отдельное одобренное действие, а не доступ к таблице.
 # Человек в UI пишет сразу; confirm: true — важное действие, и в UI только после «Подтвердить».
 # Агент только готовит: показывает человеку summary и применяет после его согласия в чате (commit_approved).
+  cars-readonly:
+    title: Автопарк — машины компании и их цена
+    owner: doronec
+    approved_by: doronec
+    approved_at: 2026-09-21
+    kind: connector
+    connector:
+      url: http://connector-cars:8080
+      token_env: CONNECTOR_CARS_TOKEN
+    datasets:
+      cars:
+        description: "Машины автопарка: марка, модель, год, цена по последней оценке, пробег, город, статус"
+        fields:
+          id: public
+          brand: public
+          model: public
+          year: public
+          price_rub: internal
+          mileage_km: internal
+          city: internal
+          status: internal
+          updated_at: internal
+
 writes:
   tasks.task:create:
     title: Создать задачу на доске
