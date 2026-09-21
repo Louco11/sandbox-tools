@@ -45,6 +45,18 @@ if command -v docker >/dev/null 2>&1; then
   docker compose version >/dev/null 2>&1 && ok "docker compose v2" || { no "нужен docker compose v2"; problems=$((problems + 1)); }
 fi
 
+# Стенд один на машину: имя проекта compose зашито (`name: sandbox`), поэтому вторая копия репозитория
+# поднимет не свой стенд, а чужой — с чужими томами. Проверяем это до того, как что-то сломается.
+OTHER=$(docker compose ls -a --format json 2>/dev/null \
+  | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{const p=JSON.parse(s).find(x=>x.Name==="sandbox");if(p&&p.ConfigFiles&&!p.ConfigFiles.startsWith(process.cwd()))console.log(p.ConfigFiles)}catch{}})' 2>/dev/null || true)
+if [ -n "$OTHER" ]; then
+  no "на этой машине уже есть стенд песочницы из другого каталога:"
+  printf '    %s\n' "$OTHER"
+  printf '    Стенд один на машину: порты и тома общие. Погасите тот стенд (docker compose down в его каталоге)\n'
+  printf '    или задайте этой копии своё имя проекта: echo COMPOSE_PROJECT_NAME=sandbox-2 >> .env\n'
+  problems=$((problems + 1))
+fi
+
 # Порты стенда. Занятый порт — не всегда беда: это может быть сам стенд, поднятый раньше.
 say "2. Порты"
 RUNNING=$(docker compose ps --status running -q 2>/dev/null | wc -l | tr -d ' ')

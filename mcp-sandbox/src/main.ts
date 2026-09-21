@@ -352,6 +352,15 @@ server.registerTool(
   ({ name }) =>
     guard(async () => {
       if (!existsSync(toolDir(name))) return fail(`нет tools/${name}`);
+      // Файлы тула должны быть под git: иначе push уйдёт без них, а конвейер честно выкатит пустоту.
+      const tracked = run('git', ['ls-files', '--', `tools/${name}`]).out;
+      if (!tracked) {
+        const why = run('git', ['check-ignore', '-v', '--', `tools/${name}/tool.yaml`]).out;
+        return fail(
+          `файлы tools/${name} не под git — превью собирать не из чего.\n`
+          + (why ? `Их игнорирует правило: ${why}\n` : 'Сделайте git add tools/' + name + '\n'),
+        );
+      }
       const dirty = run('git', ['status', '--porcelain', '--', `tools/${name}`, 'package.json', 'package-lock.json']).out;
       if (dirty) return fail(`Есть незакоммиченные изменения — превью собирается только из коммита:\n${dirty}`);
 
@@ -372,6 +381,13 @@ server.registerTool(
       const d = await waitDeploy(sha);
       const total = Math.round((Date.now() - started) / 1000);
       if (d.state !== 'success') return fail(`CI зелёный, выкатка: ${d.state} (${DEPLOYER_URL}/deploys/${sha})\n\n${d.log}`);
+      // Зелёная выкатка, в которой этот тул не выкатился, — не успех: ссылку на несуществующее превью не отдаём.
+      if (!(d.log ?? '').includes(`▶ ${name} `)) {
+        return fail(
+          `выкатка прошла, но тула ${name} в ней нет — превью не поднято.\n`
+          + `Обычно это значит, что изменения тула не попали в коммит (проверьте git status и .gitignore).\n\n${d.log}`,
+        );
+      }
 
       const url = `http://${name}--preview.${DOMAIN}:${PUBLIC_PORT}`;
       return ok({

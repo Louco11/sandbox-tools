@@ -74,9 +74,14 @@ rm "$OUT/README.md"
 cp publish/README.md "$OUT/README.md"
 cp publish/SECURITY.md publish/LICENSE "$OUT/"
 sed "s/\${YEAR}/$(date +%Y)/; s/internal-tools contributors/${PUBLISH_COPYRIGHT:-internal-tools contributors}/" publish/NOTICE > "$OUT/NOTICE"
-mkdir -p "$OUT/tools" "$OUT/.github/workflows"
-cp publish/tools/README.md publish/tools/.gitignore "$OUT/tools/"
-cp publish/.github/workflows/check.yml "$OUT/.github/workflows/"
+mkdir -p "$OUT/tools"
+cp publish/tools/README.md "$OUT/tools/"
+# GitHub отклоняет пуш с .github/workflows, если у токена нет права `workflow`. Поэтому по умолчанию
+# workflow не уезжает: PUBLISH_WORKFLOWS=1 — когда право выдано (gh auth refresh -h github.com -s workflow).
+if [ "${PUBLISH_WORKFLOWS:-0}" = 1 ]; then
+  mkdir -p "$OUT/.github/workflows"
+  cp publish/.github/workflows/check.yml "$OUT/.github/workflows/"
+fi
 # Ссылки на русский README внутри него самого ведут на его новое имя.
 ok "README.md (en), README.ru.md, SECURITY.md, LICENSE, NOTICE"
 
@@ -202,4 +207,9 @@ else
 TEXT
 fi
 
-# Пуш в GitHub может упереться в право `workflow` у токена gh: файл .github/workflows публикуется отдельно.
+if [ "${PUBLISH_WORKFLOWS:-0}" != 1 ]; then
+  cat <<'TEXT'
+Проверки GitHub Actions (.github/workflows/check.yml) в экспорт не попали: GitHub отклоняет пуш, если у токена
+нет права `workflow`. Когда оно есть — gh auth refresh -h github.com -s workflow — соберите с PUBLISH_WORKFLOWS=1.
+TEXT
+fi

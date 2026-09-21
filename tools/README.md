@@ -1,6 +1,7 @@
 # tools/
 
-Empty on purpose.
+Empty on purpose — but not ignored: tools you create here are committed and go to production through a PR,
+like everything else.
 
 This is where tools live on a running stand, and tools do not travel between stands: a tool has an owner, a
 lifetime and a registration in one particular gateway. Copying someone else's `tools/` into your checkout would
