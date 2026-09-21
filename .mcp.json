@@ -6,6 +6,14 @@
       "args": [
         "platform"
       ]
+    },
+    "sandbox-team-load": {
+      "type": "stdio",
+      "command": "./bin/sandbox-mcp",
+      "args": [
+        "tool",
+        "team-load"
+      ]
     }
   }
 }

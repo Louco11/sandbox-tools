@@ -9,6 +9,15 @@
         "exec \"$(git rev-parse --show-toplevel)/bin/sandbox-mcp\" platform"
       ],
       "enabled": true
+    },
+    "sandbox-team-load": {
+      "type": "local",
+      "command": [
+        "sh",
+        "-c",
+        "exec \"$(git rev-parse --show-toplevel)/bin/sandbox-mcp\" tool team-load"
+      ],
+      "enabled": true
     }
   }
 }

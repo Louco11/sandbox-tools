@@ -5,6 +5,13 @@
       "args": [
         "platform"
       ]
+    },
+    "sandbox-team-load": {
+      "command": "${workspaceFolder}/bin/sandbox-mcp",
+      "args": [
+        "tool",
+        "team-load"
+      ]
     }
   }
 }
