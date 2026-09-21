@@ -1,0 +1,29 @@
+# Соответствия MCP-сервера Holst (holst-mcp) наборам и правам записи песочницы.
+# Проброшены только нужные инструменты; без import_holst / upload_assets (одноразовые URL-секреты),
+# без get_screenshot / download_assets / export_holst / get_guide (не наборы строк).
+#
+# Проверка (validate) — stdio-фикстура. Живой Holst: задайте HOLST_MCP_URL=http://127.0.0.1:47641/mcp
+# (порт у десктопа свой — смотрите конфиг MCP-хоста).
+name: holst
+server:
+  url_env: HOLST_MCP_URL
+  command: node
+  args: [--disable-warning=ExperimentalWarning, connectors/holst/fixture/server.ts]
+  env: [FIXTURE_DATA_FILE]
+datasets:
+  workspaces:
+    tool: list_workspaces
+    rows: data.workspaces
+    map:
+      id: id
+      name: name
+      role: role
+writes:
+  holst.board:create:
+    tool: create_board
+    args: { name: name, workspaceId: workspace_id }
+    summary: "Создать доску «{name}»"
+  holst.board:run:
+    tool: use_holst
+    args: { boardId: board_id, code: code, description: description }
+    summary: "На доске {board_id}: {description}"
