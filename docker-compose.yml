@@ -20,28 +20,6 @@ services:
       POSTGRES_DB: sources
       POSTGRES_USER: sources_admin
       POSTGRES_PASSWORD: ${PG_ADMIN_PASSWORD:?run make env}
-      PG_TASKS_READONLY_PASSWORD: ${PG_TASKS_READONLY_PASSWORD:?run make env}
-      PG_KNOWLEDGE_READONLY_PASSWORD: ${PG_KNOWLEDGE_READONLY_PASSWORD:?run make env}
-      PG_TASKS_CREATE_PASSWORD: ${PG_TASKS_CREATE_PASSWORD:?run make env}
-      PG_TASKS_UPDATE_PASSWORD: ${PG_TASKS_UPDATE_PASSWORD:?run make env}
-      PG_KNOWLEDGE_NOTE_CREATE_PASSWORD: ${PG_KNOWLEDGE_NOTE_CREATE_PASSWORD:?run make env}
-      PG_BOARDS_READONLY_PASSWORD: ${PG_BOARDS_READONLY_PASSWORD:?run make env}
-      PG_BOARDS_CREATE_PASSWORD: ${PG_BOARDS_CREATE_PASSWORD:?run make env}
-      PG_BOARDS_SAVE_PASSWORD: ${PG_BOARDS_SAVE_PASSWORD:?run make env}
-      PG_PASTRY_READONLY_PASSWORD: ${PG_PASTRY_READONLY_PASSWORD:?run make env}
-      PG_PASTRY_CLIENT_CREATE_PASSWORD: ${PG_PASTRY_CLIENT_CREATE_PASSWORD:?run make env}
-      PG_PASTRY_CLIENT_UPDATE_PASSWORD: ${PG_PASTRY_CLIENT_UPDATE_PASSWORD:?run make env}
-      PG_PASTRY_CAKE_TYPE_CREATE_PASSWORD: ${PG_PASTRY_CAKE_TYPE_CREATE_PASSWORD:?run make env}
-      PG_PASTRY_CAKE_TYPE_UPDATE_PASSWORD: ${PG_PASTRY_CAKE_TYPE_UPDATE_PASSWORD:?run make env}
-      PG_PASTRY_RECIPE_UPSERT_PASSWORD: ${PG_PASTRY_RECIPE_UPSERT_PASSWORD:?run make env}
-      PG_PASTRY_RECIPE_DELETE_PASSWORD: ${PG_PASTRY_RECIPE_DELETE_PASSWORD:?run make env}
-      PG_PASTRY_INGREDIENT_CREATE_PASSWORD: ${PG_PASTRY_INGREDIENT_CREATE_PASSWORD:?run make env}
-      PG_PASTRY_INGREDIENT_UPDATE_PASSWORD: ${PG_PASTRY_INGREDIENT_UPDATE_PASSWORD:?run make env}
-      PG_PASTRY_STOCK_RECEIVE_PASSWORD: ${PG_PASTRY_STOCK_RECEIVE_PASSWORD:?run make env}
-      PG_PASTRY_STOCK_ADJUST_PASSWORD: ${PG_PASTRY_STOCK_ADJUST_PASSWORD:?run make env}
-      PG_PASTRY_ORDER_CREATE_PASSWORD: ${PG_PASTRY_ORDER_CREATE_PASSWORD:?run make env}
-      PG_PASTRY_ORDER_UPDATE_PASSWORD: ${PG_PASTRY_ORDER_UPDATE_PASSWORD:?run make env}
-      PG_PASTRY_ORDER_START_BAKING_PASSWORD: ${PG_PASTRY_ORDER_START_BAKING_PASSWORD:?run make env}
       PG_GATEWAY_PASSWORD: ${PG_GATEWAY_PASSWORD}
       # Схемы identity создаёт тот же init/migrate: пароль роли нужен и здесь.
       PG_IDENTITY_PASSWORD: ${PG_IDENTITY_PASSWORD}
@@ -68,11 +46,6 @@ services:
       PG_HOST: postgres
       PG_GATEWAY_PASSWORD: ${PG_GATEWAY_PASSWORD:?run make env}
       # Токены коннекторов (token_env в реестре): по ним коннектор узнаёт гейтвей.
-      CONNECTOR_TASKS_TOKEN: ${CONNECTOR_TASKS_TOKEN:?run make env}
-      CONNECTOR_KNOWLEDGE_TOKEN: ${CONNECTOR_KNOWLEDGE_TOKEN:?run make env}
-      CONNECTOR_BOARDS_TOKEN: ${CONNECTOR_BOARDS_TOKEN:?run make env}
-      CONNECTOR_PASTRY_TOKEN: ${CONNECTOR_PASTRY_TOKEN:?run make env}
-      CONNECTOR_SUPPLIERS_TOKEN: ${CONNECTOR_SUPPLIERS_TOKEN:?run make env}
       CONNECTOR_CARS_TOKEN: ${CONNECTOR_CARS_TOKEN:?run make env}
       GATEWAY_JWT_SECRET: ${GATEWAY_JWT_SECRET:?run make env}
       GATEWAY_ADMIN_TOKEN: ${GATEWAY_ADMIN_TOKEN:?run make env}
@@ -191,107 +164,6 @@ services:
       traefik.http.routers.deployer.entrypoints: web
       traefik.http.routers.deployer.middlewares: strip-identity@docker,sandbox-auth@docker
       traefik.http.services.deployer.loadbalancer.server.port: "8080"
-    restart: unless-stopped
-
-  # Коннекторы источников postgres стенда (connectors/postgres): один образ, экземпляр на источник. У каждого — только
-  # роли своего источника с минимальными грантами; видит гейтвей (sources) и Postgres (data), больше ничего.
-  connector-tasks:
-    build:
-      context: .
-      dockerfile: connectors/postgres/Dockerfile
-    depends_on:
-      postgres:
-        condition: service_healthy
-    environment:
-      SOURCE: tasks
-      CONNECTOR_TOKEN: ${CONNECTOR_TASKS_TOKEN:?run make env}
-      PG_HOST: postgres
-      PG_TASKS_READONLY_PASSWORD: ${PG_TASKS_READONLY_PASSWORD:?run make env}
-      PG_TASKS_CREATE_PASSWORD: ${PG_TASKS_CREATE_PASSWORD:?run make env}
-      PG_TASKS_UPDATE_PASSWORD: ${PG_TASKS_UPDATE_PASSWORD:?run make env}
-    networks: [sources, data]
-    restart: unless-stopped
-
-  connector-knowledge:
-    build:
-      context: .
-      dockerfile: connectors/postgres/Dockerfile
-    depends_on:
-      postgres:
-        condition: service_healthy
-    environment:
-      SOURCE: knowledge
-      CONNECTOR_TOKEN: ${CONNECTOR_KNOWLEDGE_TOKEN:?run make env}
-      PG_HOST: postgres
-      PG_KNOWLEDGE_READONLY_PASSWORD: ${PG_KNOWLEDGE_READONLY_PASSWORD:?run make env}
-      PG_KNOWLEDGE_NOTE_CREATE_PASSWORD: ${PG_KNOWLEDGE_NOTE_CREATE_PASSWORD:?run make env}
-    networks: [sources, data]
-    restart: unless-stopped
-
-  connector-boards:
-    build:
-      context: .
-      dockerfile: connectors/postgres/Dockerfile
-    depends_on:
-      postgres:
-        condition: service_healthy
-    environment:
-      SOURCE: boards
-      CONNECTOR_TOKEN: ${CONNECTOR_BOARDS_TOKEN:?run make env}
-      PG_HOST: postgres
-      PG_BOARDS_READONLY_PASSWORD: ${PG_BOARDS_READONLY_PASSWORD:?run make env}
-      PG_BOARDS_CREATE_PASSWORD: ${PG_BOARDS_CREATE_PASSWORD:?run make env}
-      PG_BOARDS_SAVE_PASSWORD: ${PG_BOARDS_SAVE_PASSWORD:?run make env}
-    networks: [sources, data]
-    restart: unless-stopped
-
-  connector-pastry:
-    build:
-      context: .
-      dockerfile: connectors/postgres/Dockerfile
-    depends_on:
-      postgres:
-        condition: service_healthy
-    environment:
-      SOURCE: pastry
-      CONNECTOR_TOKEN: ${CONNECTOR_PASTRY_TOKEN:?run make env}
-      PG_HOST: postgres
-      PG_PASTRY_READONLY_PASSWORD: ${PG_PASTRY_READONLY_PASSWORD:?run make env}
-      PG_PASTRY_CLIENT_CREATE_PASSWORD: ${PG_PASTRY_CLIENT_CREATE_PASSWORD:?run make env}
-      PG_PASTRY_CLIENT_UPDATE_PASSWORD: ${PG_PASTRY_CLIENT_UPDATE_PASSWORD:?run make env}
-      PG_PASTRY_CAKE_TYPE_CREATE_PASSWORD: ${PG_PASTRY_CAKE_TYPE_CREATE_PASSWORD:?run make env}
-      PG_PASTRY_CAKE_TYPE_UPDATE_PASSWORD: ${PG_PASTRY_CAKE_TYPE_UPDATE_PASSWORD:?run make env}
-      PG_PASTRY_RECIPE_UPSERT_PASSWORD: ${PG_PASTRY_RECIPE_UPSERT_PASSWORD:?run make env}
-      PG_PASTRY_RECIPE_DELETE_PASSWORD: ${PG_PASTRY_RECIPE_DELETE_PASSWORD:?run make env}
-      PG_PASTRY_INGREDIENT_CREATE_PASSWORD: ${PG_PASTRY_INGREDIENT_CREATE_PASSWORD:?run make env}
-      PG_PASTRY_INGREDIENT_UPDATE_PASSWORD: ${PG_PASTRY_INGREDIENT_UPDATE_PASSWORD:?run make env}
-      PG_PASTRY_STOCK_RECEIVE_PASSWORD: ${PG_PASTRY_STOCK_RECEIVE_PASSWORD:?run make env}
-      PG_PASTRY_STOCK_ADJUST_PASSWORD: ${PG_PASTRY_STOCK_ADJUST_PASSWORD:?run make env}
-      PG_PASTRY_ORDER_CREATE_PASSWORD: ${PG_PASTRY_ORDER_CREATE_PASSWORD:?run make env}
-      PG_PASTRY_ORDER_UPDATE_PASSWORD: ${PG_PASTRY_ORDER_UPDATE_PASSWORD:?run make env}
-      PG_PASTRY_ORDER_START_BAKING_PASSWORD: ${PG_PASTRY_ORDER_START_BAKING_PASSWORD:?run make env}
-    networks: [sources, data]
-    restart: unless-stopped
-
-  # Коннектор источника «Поставщики» (connectors/suppliers). В компании такой сервис держит команда данных;
-  # здесь — демо: подключён записью в реестре и этим сервисом, без правки gateway/. Видит только гейтвей.
-  connector-suppliers:
-    image: node:22-bookworm-slim
-    working_dir: /app
-    command: ["node", "--disable-warning=ExperimentalWarning", "connectors/suppliers/server.ts"]
-    environment:
-      CONNECTOR_TOKEN: ${CONNECTOR_SUPPLIERS_TOKEN:?run make env}
-      DATA_DIR: /data
-    volumes:
-      - ./connectors/suppliers:/app/connectors/suppliers:ro
-      - ./packages/connector:/app/packages/connector:ro
-      - suppliers-data:/data
-    networks: [sources]
-    healthcheck:
-      test: ["CMD", "node", "-e", "fetch('http://localhost:8080/healthz').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))"]
-      interval: 5s
-      timeout: 3s
-      retries: 20
     restart: unless-stopped
 
   # Система «Автопарк»: своя база, как у настоящего источника. Песочница её не видит — только коннектор,
@@ -539,5 +411,4 @@ volumes:
   notifier-state: {}
   identity-state: {}
   keycloak-data: {}
-  suppliers-data: {}
   cars-data: {}

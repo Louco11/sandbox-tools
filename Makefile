@@ -26,8 +26,6 @@ public: ## Публичный экспорт в dist/public: платформа 
 
 migrate: stand env ## Досоздать новые источники и гранты на живом стенде без потери данных (идемпотентно)
 	docker compose up -d --wait postgres
-	docker compose exec -T postgres sh /docker-entrypoint-initdb.d/04-boards.sh
-	docker compose exec -T postgres sh /docker-entrypoint-initdb.d/05-pastry.sh
 	docker compose exec -T postgres sh /docker-entrypoint-initdb.d/06-gateway-grants.sh
 	docker compose exec -T postgres sh /docker-entrypoint-initdb.d/07-tool-history.sh
 	docker compose exec -T postgres sh /docker-entrypoint-initdb.d/08-identity.sh
