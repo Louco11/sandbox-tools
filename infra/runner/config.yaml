@@ -1,0 +1,27 @@
+log:
+  level: info
+
+runner:
+  file: /data/.runner
+  capacity: 2
+  timeout: 30m
+  labels:
+    # Локальный образ из infra/ci: только Node. Собирается в `make up`.
+    - "ubuntu-latest:docker://sandbox-ci:latest"
+
+cache:
+  enabled: false
+
+container:
+  # Раннер отдаёт джобам свой адрес инстанса (http://gitea:3000), а не ROOT_URL,
+  # поэтому джобы живут в сети ci — там только Gitea. Гейтвея и данных в этой сети нет.
+  network: sandbox_ci
+  privileged: false
+  force_pull: false
+  # «-»: раннер сам находит Docker, но НЕ монтирует сокет в джобы. Workflow приходит из ветки,
+  # и сокет Docker в джобе — это root на хосте и доступ к сети data в обход гейтвея.
+  docker_host: "-"
+  # Общий кэш npm между джобами: без него каждая джоба качает все пакеты заново.
+  options: "-v sandbox-npm-cache:/root/.npm"
+  valid_volumes:
+    - sandbox-npm-cache

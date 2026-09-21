@@ -1,0 +1,11 @@
+{
+  "name": "@sandbox/connector-crm-demo",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.30.0",
+    "yaml": "^2.9.1",
+    "zod": "^4.6.5"
+  }
+}

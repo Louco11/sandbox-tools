@@ -1,0 +1,21 @@
+# Соответствия MCP-сервера системы наборам и правам записи песочницы (packages/connector/src/mcp.ts).
+# Отображается ТОЛЬКО перечисленное: остальные инструменты сервера тулы не получат. Каждый — отдельно в реестре.
+# TODO агенту: вместо фикстуры — настоящий сервер системы:
+#   локальный:  command/args (процесс внутри контейнера коннектора), env — какие переменные ему передать;
+#   удалённый:  url: https://…/mcp, headers_env: { Authorization: СИСТЕМА_MCP_AUTH } (учётка — из окружения).
+# Опасные инструменты (у сервера — destructiveHint) — только с confirm: true в реестре.
+name: __NAME__
+server:
+  command: node
+  args: [--disable-warning=ExperimentalWarning, connectors/__NAME__/fixture/server.ts]
+  env: [FIXTURE_DATA_FILE]
+datasets:
+  items:
+    tool: list_items
+    rows: items
+writes:
+  __PREFIX__.item:set_status:
+    tool: update_item
+    args: { id: item_id, status: status }
+    read: { tool: get_item, args: { id: item_id }, as: item }
+    summary: "Позиция «{item.name}»: статус {item.status} → {status}"

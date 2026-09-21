@@ -1,0 +1,33 @@
+# ЧЕРНОВИК записи в реестр — предложение, а не решение. Одобряют ИБ и владелец данных CRM: переносят в
+# registry/sources.yaml (с approved_by — кто одобрил), заводят токен и сервис коннектора. Проверка контракта
+# (make validate-connector NAME=crm-demo) работает и по черновику.
+sources:
+  crm-demo-readonly:
+    title: CRM — сделки (демо через MCP-сервер, только чтение)
+    owner: ivan.petrov
+    approved_by: не одобрено
+    approved_at: не одобрено
+    kind: connector
+    connector:
+      url: http://connector-crm-demo:8080
+      token_env: CONNECTOR_CRM_DEMO_TOKEN
+    datasets:
+      deals:
+        description: Сделки CRM; stage — lead | negotiation | won | lost
+        fields:
+          id: public
+          title: internal
+          client: confidential
+          amount: confidential
+          stage: internal
+
+writes:
+  crm.deal:set_stage:
+    title: Сменить стадию сделки
+    owner: ivan.petrov
+    approved_by: не одобрено
+    approved_at: не одобрено
+    source: crm-demo-readonly
+    params:
+      deal_id: { type: integer }
+      stage: { type: enum, values: [lead, negotiation, won, lost] }

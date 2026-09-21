@@ -1,0 +1,44 @@
+# Справочник сотрудников — заглушка HR/IdP до шага Б1 (docs/roadmap.md). Решение человека, как и реестр: агенты его
+# не правят. Гейтвей перечитывает файл без рестарта; сломанный не применяется, работает прежний.
+#
+# Хранит только исключения. Логин, которого здесь нет, считается работающим сотрудником.
+#   people  — кто ушёл (active: false), кто чей руководитель, e-mail (по нему находим автора коммита);
+#   groups  — владельцы-группы (очередь поддержки) и роли песочницы.
+# Кто решает за владельца тула (продлить, удалить) и получает уведомления:
+#   работает — он сам; ушёл — руководитель (вверх по цепочке); группа — её работающие участники;
+#   никого — тул сразу уходит в простой, решают и получают уведомления sandbox-admins.
+# Человек стенда (GITEA_HUMAN_USER) всегда входит в sandbox-admins и sandbox-approvers.
+
+version: 1
+
+people:
+  anna.smirnova:
+    name: Анна Смирнова
+    email: anna.smirnova@example.com
+  igor.kozlov:
+    name: Игорь Козлов
+    email: igor.kozlov@example.com
+    manager: anna.smirnova
+  maria.volkova:
+    name: Мария Волкова
+    email: maria.volkova@example.com
+    manager: anna.smirnova
+  sergey.nikitin:
+    name: Сергей Никитин
+    email: sergey.nikitin@example.com
+    manager: igor.kozlov
+    active: false            # ушёл из компании: его тулы решает руководитель
+  pavel.orlov:
+    name: Павел Орлов
+    active: false            # ушёл, руководителя в справочнике нет: его тулы ничьи — сразу в простой
+
+groups:
+  sandbox-admins:
+    title: Администраторы песочницы
+    members: []
+  sandbox-approvers:
+    title: Одобряют PR в main
+    members: []
+  support-team:
+    title: Очередь поддержки — пример владельца-группы
+    members: [igor.kozlov, maria.volkova]

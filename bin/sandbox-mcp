@@ -1,0 +1,54 @@
+#!/bin/sh
+# Единая точка входа MCP песочницы для любого агента: Claude Code, Cursor, OpenCode, Codex, Claude Desktop.
+#
+#   bin/sandbox-mcp platform              mcp-sandbox — build-time: list_sources, scaffold_tool, validate_manifest,
+#                                         deploy_preview, get_logs
+#   bin/sandbox-mcp tool <имя>            run-time инструменты тула <имя> (stdio ↔ http://<имя>.<SANDBOX_DOMAIN>:18000/mcp)
+#   bin/sandbox-mcp login [домен]         вход человека: браузер подтверждает, ключ MCP ложится в Keychain
+#
+# Кто вы — решает IdP. Без ключа мост сам откроет браузер при первом запуске; `login` делает это заранее
+# и кладёт личный ключ, который живёт дольше и переживает перезапуски.
+# Node нужен ≥ 22.18 (запускает TypeScript без сборки): $SANDBOX_NODE, node из PATH или типовые пути.
+set -eu
+
+ROOT=$(cd "$(dirname "$0")/.." && pwd -P)
+
+pick_node() {
+  for n in "${SANDBOX_NODE:-}" "$(command -v node 2>/dev/null || true)" "$HOME/.local/bin/node" /opt/homebrew/bin/node /usr/local/bin/node; do
+    [ -n "$n" ] && [ -x "$n" ] || continue
+    if "$n" -e 'const [a, b] = process.versions.node.split(".").map(Number); process.exit(a > 22 || (a === 22 && b >= 18) ? 0 : 1)' 2>/dev/null; then
+      echo "$n"
+      return 0
+    fi
+  done
+  echo "sandbox-mcp: нужен Node ≥ 22.18 (задайте SANDBOX_NODE=/путь/к/node)" >&2
+  return 1
+}
+
+usage() {
+  sed -n '2,10p' "$0" | sed 's/^# \{0,1\}//' >&2
+  exit 2
+}
+
+[ -d "$ROOT/node_modules" ] || { echo "sandbox-mcp: нет node_modules — выполните npm install в $ROOT" >&2; exit 1; }
+NODE=$(pick_node)
+
+case "${1:-}" in
+  login)
+    domain=$(sed -n "s/^SANDBOX_DOMAIN=//p" "$ROOT/.env" 2>/dev/null | tail -1)
+    exec "$NODE" --disable-warning=ExperimentalWarning "$ROOT/infra/mcp-login.ts" "${2:-${domain:-tools.localhost}:18000}" "${3:-}"
+    ;;
+  platform)
+    exec "$NODE" --disable-warning=ExperimentalWarning "$ROOT/mcp-sandbox/src/main.ts"
+    ;;
+  tool)
+    name=${2:-}
+    [ -n "$name" ] || usage
+    # Домен витрины — из .env: tools.localhost на стенде, tools.<ip>.sslip.io в локальной сети и на удалённой рабочей копии.
+    domain=$(sed -n "s/^SANDBOX_DOMAIN=//p" "$ROOT/.env" 2>/dev/null | tail -1)
+    exec "$NODE" --disable-warning=ExperimentalWarning "$ROOT/infra/mcp-bridge.ts" "http://$name.${domain:-tools.localhost}:18000/mcp"
+    ;;
+  *)
+    usage
+    ;;
+esac

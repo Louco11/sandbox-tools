@@ -1,0 +1,21 @@
+{
+  "name": "@sandbox/gateway",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node src/main.ts"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.30.0",
+    "@sandbox/manifest": "^0.1.0",
+    "express": "^5.2.1",
+    "jose": "^6.2.12",
+    "pg": "^8.23.0",
+    "zod": "^4.6.5"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.6",
+    "@types/pg": "^8.23.1"
+  }
+}

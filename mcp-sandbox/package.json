@@ -1,0 +1,15 @@
+{
+  "name": "@sandbox/mcp-sandbox",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "mcp-sandbox": "./src/main.ts"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.30.0",
+    "@sandbox/manifest": "^0.1.0",
+    "yaml": "^2.9.1",
+    "zod": "^4.6.5"
+  }
+}

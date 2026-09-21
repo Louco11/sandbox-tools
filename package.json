@@ -1,0 +1,24 @@
+{
+  "name": "internal-tools",
+  "private": true,
+  "type": "module",
+  "workspaces": [
+    "packages/*",
+    "gateway",
+    "tools/*",
+    "mcp-sandbox",
+    "connectors/*",
+    "infra/identity"
+  ],
+  "engines": {
+    "node": ">=22.18"
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json"
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.3",
+    "esbuild": "^0.28.2",
+    "typescript": "^7.0.2"
+  }
+}

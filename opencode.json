@@ -1,0 +1,14 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "mcp": {
+    "sandbox": {
+      "type": "local",
+      "command": [
+        "sh",
+        "-c",
+        "exec \"$(git rev-parse --show-toplevel)/bin/sandbox-mcp\" platform"
+      ],
+      "enabled": true
+    }
+  }
+}

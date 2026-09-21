@@ -1,0 +1,32 @@
+# ЧЕРНОВИК записи в реестр — предложение агента, а не решение. Одобряют ИБ и владелец данных: переносят в
+# registry/sources.yaml (approved_by — кто одобрил), заводят токен (infra/init-env.sh) и сервис коннектора
+# (docker-compose.yml, сеть sources + сеть только до системы). make validate-connector NAME=__NAME__ работает и по черновику.
+# TODO агенту: наборы, поля с чувствительностью (public < internal < confidential < personal) и права записи системы.
+sources:
+  __SOURCE__:
+    title: __TITLE__
+    owner: __OWNER__
+    approved_by: не одобрено
+    approved_at: не одобрено
+    kind: connector
+    connector:
+      url: http://connector-__NAME__:8080
+      token_env: __TOKEN_ENV__
+    datasets:
+      items:
+        description: Позиции системы
+        fields:
+          id: public
+          name: internal
+          status: internal
+
+writes:
+  __PREFIX__.item:set_status:
+    title: Сменить статус позиции
+    owner: __OWNER__
+    approved_by: не одобрено
+    approved_at: не одобрено
+    source: __SOURCE__
+    params:
+      item_id: { type: integer }
+      status: { type: enum, values: [active, archived] }

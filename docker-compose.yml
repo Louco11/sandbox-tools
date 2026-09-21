@@ -1,0 +1,482 @@
+# Локальный стенд песочницы. Поднимается одной командой: `make up`.
+#
+# Порты слушают только 127.0.0.1. В локальную сеть стенд открывает `make lan HOST=<ip>` (SANDBOX_BIND,
+# SANDBOX_HOST, SANDBOX_DOMAIN в .env) — только до настоящей авторизации: SSO пока заглушка.
+#
+# Сети — это и есть изоляция, а не соглашение:
+#   data  — internal: Postgres и гейтвей. Наружу не выходит, порт Postgres не публикуется.
+#   tools — internal: тулы, гейтвей, Traefik. У тулов нет маршрута никуда, кроме этой сети.
+#   control — internal: гейтвей и сервисы платформы с его сервисными токенами (деплоер, уборщик).
+#   sources — internal: гейтвей и коннекторы источников. Тулы, CI и платформа до коннекторов не достают.
+#   edge  — Traefik публикует витрину на хост.
+#   ci    — Gitea, раннер и джобы CI. Гейтвея здесь нет: джоба исполняет workflow из ветки.
+
+name: sandbox
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: sources
+      POSTGRES_USER: sources_admin
+      POSTGRES_PASSWORD: ${PG_ADMIN_PASSWORD:?run make env}
+      PG_TASKS_READONLY_PASSWORD: ${PG_TASKS_READONLY_PASSWORD:?run make env}
+      PG_KNOWLEDGE_READONLY_PASSWORD: ${PG_KNOWLEDGE_READONLY_PASSWORD:?run make env}
+      PG_TASKS_CREATE_PASSWORD: ${PG_TASKS_CREATE_PASSWORD:?run make env}
+      PG_TASKS_UPDATE_PASSWORD: ${PG_TASKS_UPDATE_PASSWORD:?run make env}
+      PG_KNOWLEDGE_NOTE_CREATE_PASSWORD: ${PG_KNOWLEDGE_NOTE_CREATE_PASSWORD:?run make env}
+      PG_BOARDS_READONLY_PASSWORD: ${PG_BOARDS_READONLY_PASSWORD:?run make env}
+      PG_BOARDS_CREATE_PASSWORD: ${PG_BOARDS_CREATE_PASSWORD:?run make env}
+      PG_BOARDS_SAVE_PASSWORD: ${PG_BOARDS_SAVE_PASSWORD:?run make env}
+      PG_PASTRY_READONLY_PASSWORD: ${PG_PASTRY_READONLY_PASSWORD:?run make env}
+      PG_PASTRY_CLIENT_CREATE_PASSWORD: ${PG_PASTRY_CLIENT_CREATE_PASSWORD:?run make env}
+      PG_PASTRY_CLIENT_UPDATE_PASSWORD: ${PG_PASTRY_CLIENT_UPDATE_PASSWORD:?run make env}
+      PG_PASTRY_CAKE_TYPE_CREATE_PASSWORD: ${PG_PASTRY_CAKE_TYPE_CREATE_PASSWORD:?run make env}
+      PG_PASTRY_CAKE_TYPE_UPDATE_PASSWORD: ${PG_PASTRY_CAKE_TYPE_UPDATE_PASSWORD:?run make env}
+      PG_PASTRY_RECIPE_UPSERT_PASSWORD: ${PG_PASTRY_RECIPE_UPSERT_PASSWORD:?run make env}
+      PG_PASTRY_RECIPE_DELETE_PASSWORD: ${PG_PASTRY_RECIPE_DELETE_PASSWORD:?run make env}
+      PG_PASTRY_INGREDIENT_CREATE_PASSWORD: ${PG_PASTRY_INGREDIENT_CREATE_PASSWORD:?run make env}
+      PG_PASTRY_INGREDIENT_UPDATE_PASSWORD: ${PG_PASTRY_INGREDIENT_UPDATE_PASSWORD:?run make env}
+      PG_PASTRY_STOCK_RECEIVE_PASSWORD: ${PG_PASTRY_STOCK_RECEIVE_PASSWORD:?run make env}
+      PG_PASTRY_STOCK_ADJUST_PASSWORD: ${PG_PASTRY_STOCK_ADJUST_PASSWORD:?run make env}
+      PG_PASTRY_ORDER_CREATE_PASSWORD: ${PG_PASTRY_ORDER_CREATE_PASSWORD:?run make env}
+      PG_PASTRY_ORDER_UPDATE_PASSWORD: ${PG_PASTRY_ORDER_UPDATE_PASSWORD:?run make env}
+      PG_PASTRY_ORDER_START_BAKING_PASSWORD: ${PG_PASTRY_ORDER_START_BAKING_PASSWORD:?run make env}
+      PG_GATEWAY_PASSWORD: ${PG_GATEWAY_PASSWORD}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./infra/postgres/init:/docker-entrypoint-initdb.d:ro
+    networks: [data]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U sources_admin -d sources"]
+      interval: 3s
+      timeout: 3s
+      retries: 30
+    restart: unless-stopped
+
+  # Единственный путь к данным. Видит Postgres (data) и тулы (tools); тулы Postgres не видят.
+  gateway:
+    build:
+      context: .
+      dockerfile: gateway/Dockerfile
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      PG_HOST: postgres
+      PG_GATEWAY_PASSWORD: ${PG_GATEWAY_PASSWORD:?run make env}
+      # Токены коннекторов (token_env в реестре): по ним коннектор узнаёт гейтвей.
+      CONNECTOR_TASKS_TOKEN: ${CONNECTOR_TASKS_TOKEN:?run make env}
+      CONNECTOR_KNOWLEDGE_TOKEN: ${CONNECTOR_KNOWLEDGE_TOKEN:?run make env}
+      CONNECTOR_BOARDS_TOKEN: ${CONNECTOR_BOARDS_TOKEN:?run make env}
+      CONNECTOR_PASTRY_TOKEN: ${CONNECTOR_PASTRY_TOKEN:?run make env}
+      CONNECTOR_SUPPLIERS_TOKEN: ${CONNECTOR_SUPPLIERS_TOKEN:?run make env}
+      GATEWAY_JWT_SECRET: ${GATEWAY_JWT_SECRET:?run make env}
+      GATEWAY_ADMIN_TOKEN: ${GATEWAY_ADMIN_TOKEN:?run make env}
+      GATEWAY_DEPLOY_TOKEN: ${GATEWAY_DEPLOY_TOKEN:?run make env}
+      GATEWAY_REAPER_TOKEN: ${GATEWAY_REAPER_TOKEN:?run make env}
+      GATEWAY_PORTAL_TOKEN: ${GATEWAY_PORTAL_TOKEN:?run make env}
+      GATEWAY_NOTIFIER_TOKEN: ${GATEWAY_NOTIFIER_TOKEN:?run make env}
+      GATEWAY_IDENTITY_TOKEN: ${GATEWAY_IDENTITY_TOKEN:?run make env}
+      REGISTRY_PATH: /registry/sources.yaml
+      # Справочник сотрудников (заглушка HR/IdP): кто решает за владельца, кому уведомления. Человек стенда — админ.
+      DIRECTORY_PATH: /registry/directory.yaml
+      SANDBOX_HUMAN: ${GITEA_HUMAN_USER:-}
+      # Личность человека проверяется по ключу сервиса identity, а не по заголовку от клиента.
+      SANDBOX_DOMAIN: ${SANDBOX_DOMAIN:-tools.localhost}
+      IDENTITY_JWKS_URL: http://identity:8080/jwks.json
+    volumes:
+      - ./registry:/registry:ro
+    ports:
+      - "${SANDBOX_BIND:-127.0.0.1}:18080:8080"
+    networks:
+      data: {}
+      tools:
+        aliases: [gateway.internal]
+      edge: {}
+      control: {}
+      sources: {}
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://localhost:8080/healthz').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
+  gitea:
+    image: gitea/gitea:1.24
+    environment:
+      USER_UID: "1000"
+      USER_GID: "1000"
+      GITEA__database__DB_TYPE: sqlite3
+      GITEA__server__DOMAIN: ${SANDBOX_HOST:-localhost}
+      GITEA__server__ROOT_URL: http://${SANDBOX_HOST:-localhost}:13000/
+      GITEA__server__HTTP_PORT: "3000"
+      GITEA__server__SSH_DOMAIN: ${SANDBOX_HOST:-localhost}
+      GITEA__server__SSH_PORT: "12222"
+      GITEA__security__INSTALL_LOCK: "true"
+      GITEA__service__DISABLE_REGISTRATION: "true"
+      GITEA__actions__ENABLED: "true"
+      GITEA__actions__DEFAULT_ACTIONS_URL: github
+      GITEA__repository__DEFAULT_BRANCH: main
+      # Глобальный токен регистрации раннера задаётся заранее, без ручных шагов в UI.
+      GITEA_RUNNER_REGISTRATION_TOKEN: ${RUNNER_REGISTRATION_TOKEN:?run make env}
+    ports:
+      - "${SANDBOX_BIND:-127.0.0.1}:13000:3000"
+      - "${SANDBOX_BIND:-127.0.0.1}:12222:22"
+    volumes:
+      - gitea-data:/data
+    networks: [ci]
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:3000/api/healthz >/dev/null"]
+      interval: 3s
+      timeout: 3s
+      retries: 40
+    restart: unless-stopped
+
+  runner:
+    image: gitea/act_runner:0.2.13
+    depends_on:
+      gitea:
+        condition: service_healthy
+    environment:
+      CONFIG_FILE: /config.yaml
+      GITEA_INSTANCE_URL: http://gitea:3000
+      GITEA_RUNNER_REGISTRATION_TOKEN: ${RUNNER_REGISTRATION_TOKEN}
+      GITEA_RUNNER_NAME: sandbox-runner-1
+    volumes:
+      - ./infra/runner/config.yaml:/config.yaml:ro
+      - runner-data:/data
+      - /var/run/docker.sock:/var/run/docker.sock
+    networks: [ci]
+    restart: unless-stopped
+
+  # Единственный, кто выкатывает тулы: ждёт зелёный CI по коммиту и деплоит своим кодом (не кодом ветки).
+  # Статус «sandbox / deploy» пишет в Gitea, лог выкатки — http://<SANDBOX_HOST>:18090/deploys/<sha>.
+  # Логи тулов для агента — /logs/<инстанс> по учётке Gitea (get_logs в mcp-sandbox).
+  deployer:
+    build:
+      context: .
+      dockerfile: infra/deployer/Dockerfile
+    depends_on:
+      gateway:
+        condition: service_healthy
+      gitea:
+        condition: service_healthy
+    environment:
+      GITEA_URL: http://gitea:3000
+      GITEA_DEPLOYER_USER: ${GITEA_DEPLOYER_USER:?run make env}
+      GITEA_DEPLOYER_PASSWORD: ${GITEA_DEPLOYER_PASSWORD:?run make env}
+      GATEWAY_URL: http://gateway:8080
+      GATEWAY_DEPLOY_TOKEN: ${GATEWAY_DEPLOY_TOKEN:?run make env}
+      SANDBOX_DOMAIN: ${SANDBOX_DOMAIN:-tools.localhost}
+      DEPLOYER_PUBLIC_URL: http://deploy.${SANDBOX_DOMAIN:-tools.localhost}:18000
+      GITEA_PUBLIC_URL: http://${SANDBOX_HOST:-localhost}:13000
+      NOTIFIER_URL: http://notifier:8080
+      NOTIFY_DEPLOYER_TOKEN: ${NOTIFY_DEPLOYER_TOKEN:?run make env}
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - deployer-state:/state
+    ports:
+      - "${SANDBOX_BIND:-127.0.0.1}:18090:8080"
+    networks: [ci, control, tools]
+    labels:
+      # Логи выкатки человеку — только после входа; агент ходит на 18090 по учётной записи Gitea.
+      traefik.enable: "true"
+      traefik.docker.network: sandbox_tools
+      traefik.http.routers.deployer.rule: Host(`deploy.${SANDBOX_DOMAIN:-tools.localhost}`)
+      traefik.http.routers.deployer.entrypoints: web
+      traefik.http.routers.deployer.middlewares: strip-identity@docker,sandbox-auth@docker
+      traefik.http.services.deployer.loadbalancer.server.port: "8080"
+    restart: unless-stopped
+
+  # Коннекторы источников postgres стенда (connectors/postgres): один образ, экземпляр на источник. У каждого — только
+  # роли своего источника с минимальными грантами; видит гейтвей (sources) и Postgres (data), больше ничего.
+  connector-tasks:
+    build:
+      context: .
+      dockerfile: connectors/postgres/Dockerfile
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      SOURCE: tasks
+      CONNECTOR_TOKEN: ${CONNECTOR_TASKS_TOKEN:?run make env}
+      PG_HOST: postgres
+      PG_TASKS_READONLY_PASSWORD: ${PG_TASKS_READONLY_PASSWORD:?run make env}
+      PG_TASKS_CREATE_PASSWORD: ${PG_TASKS_CREATE_PASSWORD:?run make env}
+      PG_TASKS_UPDATE_PASSWORD: ${PG_TASKS_UPDATE_PASSWORD:?run make env}
+    networks: [sources, data]
+    restart: unless-stopped
+
+  connector-knowledge:
+    build:
+      context: .
+      dockerfile: connectors/postgres/Dockerfile
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      SOURCE: knowledge
+      CONNECTOR_TOKEN: ${CONNECTOR_KNOWLEDGE_TOKEN:?run make env}
+      PG_HOST: postgres
+      PG_KNOWLEDGE_READONLY_PASSWORD: ${PG_KNOWLEDGE_READONLY_PASSWORD:?run make env}
+      PG_KNOWLEDGE_NOTE_CREATE_PASSWORD: ${PG_KNOWLEDGE_NOTE_CREATE_PASSWORD:?run make env}
+    networks: [sources, data]
+    restart: unless-stopped
+
+  connector-boards:
+    build:
+      context: .
+      dockerfile: connectors/postgres/Dockerfile
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      SOURCE: boards
+      CONNECTOR_TOKEN: ${CONNECTOR_BOARDS_TOKEN:?run make env}
+      PG_HOST: postgres
+      PG_BOARDS_READONLY_PASSWORD: ${PG_BOARDS_READONLY_PASSWORD:?run make env}
+      PG_BOARDS_CREATE_PASSWORD: ${PG_BOARDS_CREATE_PASSWORD:?run make env}
+      PG_BOARDS_SAVE_PASSWORD: ${PG_BOARDS_SAVE_PASSWORD:?run make env}
+    networks: [sources, data]
+    restart: unless-stopped
+
+  connector-pastry:
+    build:
+      context: .
+      dockerfile: connectors/postgres/Dockerfile
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      SOURCE: pastry
+      CONNECTOR_TOKEN: ${CONNECTOR_PASTRY_TOKEN:?run make env}
+      PG_HOST: postgres
+      PG_PASTRY_READONLY_PASSWORD: ${PG_PASTRY_READONLY_PASSWORD:?run make env}
+      PG_PASTRY_CLIENT_CREATE_PASSWORD: ${PG_PASTRY_CLIENT_CREATE_PASSWORD:?run make env}
+      PG_PASTRY_CLIENT_UPDATE_PASSWORD: ${PG_PASTRY_CLIENT_UPDATE_PASSWORD:?run make env}
+      PG_PASTRY_CAKE_TYPE_CREATE_PASSWORD: ${PG_PASTRY_CAKE_TYPE_CREATE_PASSWORD:?run make env}
+      PG_PASTRY_CAKE_TYPE_UPDATE_PASSWORD: ${PG_PASTRY_CAKE_TYPE_UPDATE_PASSWORD:?run make env}
+      PG_PASTRY_RECIPE_UPSERT_PASSWORD: ${PG_PASTRY_RECIPE_UPSERT_PASSWORD:?run make env}
+      PG_PASTRY_RECIPE_DELETE_PASSWORD: ${PG_PASTRY_RECIPE_DELETE_PASSWORD:?run make env}
+      PG_PASTRY_INGREDIENT_CREATE_PASSWORD: ${PG_PASTRY_INGREDIENT_CREATE_PASSWORD:?run make env}
+      PG_PASTRY_INGREDIENT_UPDATE_PASSWORD: ${PG_PASTRY_INGREDIENT_UPDATE_PASSWORD:?run make env}
+      PG_PASTRY_STOCK_RECEIVE_PASSWORD: ${PG_PASTRY_STOCK_RECEIVE_PASSWORD:?run make env}
+      PG_PASTRY_STOCK_ADJUST_PASSWORD: ${PG_PASTRY_STOCK_ADJUST_PASSWORD:?run make env}
+      PG_PASTRY_ORDER_CREATE_PASSWORD: ${PG_PASTRY_ORDER_CREATE_PASSWORD:?run make env}
+      PG_PASTRY_ORDER_UPDATE_PASSWORD: ${PG_PASTRY_ORDER_UPDATE_PASSWORD:?run make env}
+      PG_PASTRY_ORDER_START_BAKING_PASSWORD: ${PG_PASTRY_ORDER_START_BAKING_PASSWORD:?run make env}
+    networks: [sources, data]
+    restart: unless-stopped
+
+  # Коннектор источника «Поставщики» (connectors/suppliers). В компании такой сервис держит команда данных;
+  # здесь — демо: подключён записью в реестре и этим сервисом, без правки gateway/. Видит только гейтвей.
+  connector-suppliers:
+    image: node:22-bookworm-slim
+    working_dir: /app
+    command: ["node", "--disable-warning=ExperimentalWarning", "connectors/suppliers/server.ts"]
+    environment:
+      CONNECTOR_TOKEN: ${CONNECTOR_SUPPLIERS_TOKEN:?run make env}
+      DATA_DIR: /data
+    volumes:
+      - ./connectors/suppliers:/app/connectors/suppliers:ro
+      - ./packages/connector:/app/packages/connector:ro
+      - suppliers-data:/data
+    networks: [sources]
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://localhost:8080/healthz').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
+  # Принудительная смертность: удаляет контейнеры истёкших и отозванных тулов.
+  reaper:
+    image: node:22-bookworm-slim
+    command: ["node", "--disable-warning=ExperimentalWarning", "/reaper/reaper.ts"]
+    depends_on:
+      gateway:
+        condition: service_healthy
+    environment:
+      GATEWAY_URL: http://gateway:8080
+      GATEWAY_REAPER_TOKEN: ${GATEWAY_REAPER_TOKEN:?run make env}
+      REAPER_INTERVAL_SECONDS: "30"
+      NOTIFIER_URL: http://notifier:8080
+      NOTIFY_REAPER_TOKEN: ${NOTIFY_REAPER_TOKEN:?run make env}
+      PORTAL_URL: http://${SANDBOX_DOMAIN:-tools.localhost}:18000
+    volumes:
+      - ./infra/reaper:/reaper:ro
+      - /var/run/docker.sock:/var/run/docker.sock
+    networks: [control]
+    restart: unless-stopped
+
+  # Уведомления: события платформы → люди. Кому — решает справочник в гейтвее. Канал на стенде — входящие на главной;
+  # мессенджер или почта компании подключаются в infra/notifier (и тогда сервису нужна сеть наружу).
+  notifier:
+    image: node:22-bookworm-slim
+    command: ["node", "--disable-warning=ExperimentalWarning", "/notifier/notifier.ts"]
+    depends_on:
+      gateway:
+        condition: service_healthy
+    environment:
+      GATEWAY_URL: http://gateway:8080
+      GATEWAY_NOTIFIER_TOKEN: ${GATEWAY_NOTIFIER_TOKEN:?run make env}
+      NOTIFY_REAPER_TOKEN: ${NOTIFY_REAPER_TOKEN:?run make env}
+      NOTIFY_DEPLOYER_TOKEN: ${NOTIFY_DEPLOYER_TOKEN:?run make env}
+      NOTIFY_PORTAL_TOKEN: ${NOTIFY_PORTAL_TOKEN:?run make env}
+    volumes:
+      - ./infra/notifier:/notifier:ro
+      - notifier-state:/state
+    networks: [control]
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://localhost:8080/healthz').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
+  # Главная страница песочницы: тулы, срок жизни, ветки и PR. Только чтение.
+  portal:
+    build:
+      context: .
+      dockerfile: portal/Dockerfile
+    depends_on:
+      gateway:
+        condition: service_healthy
+    environment:
+      GATEWAY_URL: http://gateway:8080
+      GATEWAY_PORTAL_TOKEN: ${GATEWAY_PORTAL_TOKEN:?run make env}
+      SANDBOX_DOMAIN: ${SANDBOX_DOMAIN:-tools.localhost}
+      GITEA_PUBLIC_URL: http://${SANDBOX_HOST:-localhost}:13000
+      GITEA_URL: http://gitea:3000
+      GITEA_AGENT_USER: ${GITEA_AGENT_USER:?run make env}
+      GITEA_AGENT_PASSWORD: ${GITEA_AGENT_PASSWORD:?run make env}
+      NOTIFIER_URL: http://notifier:8080
+      NOTIFY_PORTAL_TOKEN: ${NOTIFY_PORTAL_TOKEN:?run make env}
+      IDENTITY_URL: http://identity:8080
+      TZ: ${SANDBOX_TZ:-UTC}
+    volumes:
+      # Рабочая копия стенда — чтобы показать незакоммиченные изменения. Только чтение.
+      - ${SANDBOX_REPO_DIR:-.}:/repo:ro
+    networks: [tools, ci, control]
+    labels:
+      traefik.enable: "true"
+      traefik.http.routers.portal.rule: Host(`${SANDBOX_DOMAIN:-tools.localhost}`)
+      traefik.http.routers.portal.middlewares: strip-identity@docker,sandbox-auth@docker
+      traefik.http.services.portal.loadbalancer.server.port: "3000"
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://localhost:3000/healthz').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
+  # IdP стенда вместо корпоративного: личность проверяется по-настоящему, заглушка — только сам поставщик личности.
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.4
+    command: ["start-dev", "--http-port=8080"]
+    environment:
+      KC_BOOTSTRAP_ADMIN_USERNAME: ${KEYCLOAK_ADMIN_USER:-admin}
+      KC_BOOTSTRAP_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:?run make env}
+      KC_HOSTNAME: http://auth.${SANDBOX_DOMAIN:-tools.localhost}:18000
+      KC_HOSTNAME_BACKCHANNEL_DYNAMIC: "true"
+      KC_HTTP_ENABLED: "true"
+      KC_PROXY_HEADERS: xforwarded
+    volumes:
+      - keycloak-data:/opt/keycloak/data
+    networks: [tools, control]
+    labels:
+      traefik.enable: "true"
+      traefik.docker.network: sandbox_tools
+      traefik.http.routers.keycloak.rule: Host(`auth.${SANDBOX_DOMAIN:-tools.localhost}`)
+      traefik.http.routers.keycloak.entrypoints: web
+      traefik.http.services.keycloak.loadbalancer.server.port: "8080"
+    restart: unless-stopped
+
+  # Личность: вход через IdP, сессия на домене песочницы, подписанный X-Sandbox-Identity для каждого запроса.
+  # Здесь же описаны middleware Traefik: сначала вырезать заголовок клиента, потом спросить разрешение.
+  identity:
+    build:
+      context: .
+      dockerfile: infra/identity/Dockerfile
+    depends_on:
+      keycloak:
+        condition: service_started
+    environment:
+      SANDBOX_DOMAIN: ${SANDBOX_DOMAIN:-tools.localhost}
+      SANDBOX_HUMAN: ${GITEA_HUMAN_USER:-}
+      KEYCLOAK_URL: http://keycloak:8080
+      KEYCLOAK_PUBLIC_URL: http://auth.${SANDBOX_DOMAIN:-tools.localhost}:18000
+      KEYCLOAK_ADMIN_USER: ${KEYCLOAK_ADMIN_USER:-admin}
+      KEYCLOAK_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:?run make env}
+      KEYCLOAK_HUMAN_PASSWORD: ${KEYCLOAK_HUMAN_PASSWORD:?run make env}
+      KEYCLOAK_DEMO_PASSWORD: ${KEYCLOAK_DEMO_PASSWORD:?run make env}
+      DIRECTORY_PATH: /registry/directory.yaml
+      # Личные ключи MCP: своя схема в Postgres, данных источников этот сервис не видит.
+      PG_HOST: postgres
+      PG_IDENTITY_PASSWORD: ${PG_IDENTITY_PASSWORD:?run make env}
+      # Группы песочницы кладёт в личность гейтвей: решение о правах остаётся у него.
+      GATEWAY_URL: http://gateway:8080
+      GATEWAY_IDENTITY_TOKEN: ${GATEWAY_IDENTITY_TOKEN:?run make env}
+    volumes:
+      - ./registry:/registry:ro
+      - identity-state:/state
+    networks: [tools, control, data]
+    labels:
+      traefik.enable: "true"
+      traefik.docker.network: sandbox_tools
+      traefik.http.routers.identity.rule: Host(`id.${SANDBOX_DOMAIN:-tools.localhost}`)
+      traefik.http.routers.identity.entrypoints: web
+      traefik.http.services.identity.loadbalancer.server.port: "8080"
+      # Заголовок личности от клиента не проходит дальше Traefik: его ставит только identity.
+      traefik.http.middlewares.strip-identity.headers.customrequestheaders.X-Sandbox-Identity: ""
+      traefik.http.middlewares.sandbox-auth.forwardauth.address: http://identity:8080/auth
+      traefik.http.middlewares.sandbox-auth.forwardauth.authResponseHeaders: X-Sandbox-Identity
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://localhost:8080/healthz').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))"]
+      interval: 5s
+      timeout: 3s
+      retries: 60
+    restart: unless-stopped
+
+  traefik:
+    image: traefik:v3.5
+    command:
+      - --providers.docker=true
+      - --providers.docker.exposedbydefault=false
+      - --providers.docker.network=sandbox_tools
+      - --entrypoints.web.address=:80
+      - --api.dashboard=true
+    ports:
+      - "${SANDBOX_BIND:-127.0.0.1}:18000:80"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    networks: [edge, tools]
+    labels:
+      traefik.enable: "true"
+      traefik.http.routers.dashboard.rule: Host(`traefik.${SANDBOX_DOMAIN:-tools.localhost}`)
+      traefik.http.routers.dashboard.service: api@internal
+    restart: unless-stopped
+
+networks:
+  data:
+    internal: true
+  tools:
+    internal: true
+  control:
+    internal: true
+  sources:
+    internal: true
+  edge: {}
+  ci: {}
+
+volumes:
+  pgdata: {}
+  gitea-data: {}
+  runner-data: {}
+  deployer-state: {}
+  notifier-state: {}
+  identity-state: {}
+  keycloak-data: {}
+  suppliers-data: {}

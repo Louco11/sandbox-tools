@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "sandbox": {
+      "type": "stdio",
+      "command": "./bin/sandbox-mcp",
+      "args": [
+        "platform"
+      ]
+    }
+  }
+}

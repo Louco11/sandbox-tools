@@ -1,0 +1,17 @@
+# Соответствия MCP-сервера CRM наборам и правам записи песочницы (packages/connector/src/mcp.ts).
+# Отображено только перечисленное; delete_deal у сервера есть, но сюда не попал — тулы его не получат.
+name: crm-demo
+server:
+  command: node
+  args: [--disable-warning=ExperimentalWarning, connectors/crm-demo/fixture/server.ts]
+  env: [CRM_DATA_FILE]
+datasets:
+  deals:
+    tool: list_deals
+    rows: deals
+writes:
+  crm.deal:set_stage:
+    tool: update_deal
+    args: { id: deal_id, stage: stage }
+    read: { tool: get_deal, args: { id: deal_id }, as: deal }
+    summary: "Сделка «{deal.title}» ({deal.client}): стадия {deal.stage} → {stage}"

@@ -1,0 +1,10 @@
+{
+  "name": "__TOOL_NAME__",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@sandbox/sdk": "*",
+    "@sandbox/ui-kit": "*"
+  }
+}

@@ -1,0 +1,10 @@
+{
+  "mcpServers": {
+    "sandbox": {
+      "command": "${workspaceFolder}/bin/sandbox-mcp",
+      "args": [
+        "platform"
+      ]
+    }
+  }
+}

@@ -1,0 +1,16 @@
+{
+  "name": "@sandbox/connector",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./mcp": "./src/mcp.ts",
+    "./testkit": "./src/testkit.ts"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.30.0",
+    "@sandbox/manifest": "^0.1.0",
+    "yaml": "^2.9.1"
+  }
+}
