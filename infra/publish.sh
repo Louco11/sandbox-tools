@@ -32,9 +32,17 @@ command -v git >/dev/null || die "нужен git"
 command -v node >/dev/null || die "нужен node ≥ 22.18"
 [ -f publish/LICENSE ] || die "нет publish/LICENSE — публичные файлы лежат в publish/"
 
+# История публичного репозитория не переписывается: если она уже есть, обновление — обычный коммит.
 say "каталог $OUT"
+KEEP_GIT=
+if [ -d "$OUT/.git" ]; then
+  KEEP_GIT=$(mktemp -d)
+  mv "$OUT/.git" "$KEEP_GIT/.git"
+  say "история публичного репозитория сохраняется — это обновление, а не новый репозиторий"
+fi
 rm -rf "$OUT"
 mkdir -p "$OUT"
+[ -z "$KEEP_GIT" ] || { mv "$KEEP_GIT/.git" "$OUT/.git"; rmdir "$KEEP_GIT"; }
 
 # 1. Файлы платформы: только отслеживаемые git, без тулов и сгенерированных конфигов агентов.
 say "копирую платформу"
@@ -128,7 +136,9 @@ console.log(`  \u001b[32m✓\u001b[0m убрано записей тулов: ${
 say "проверяю, что уезжает"
 fail=0
 check() { # check <описание> <regexp>
-  found=$(grep -rIlE "$2" "$OUT" 2>/dev/null | sed "s|^$OUT/||" | head -5 || true)
+  # .git не проверяем: рефлог и индекс — местные файлы, они никуда не уезжают. Что уезжает в коммитах,
+  # проверяется отдельно ниже (авторы) и самим содержимым дерева.
+  found=$(grep -rIlE --exclude-dir=.git "$2" "$OUT" 2>/dev/null | sed "s|^$OUT/||" | head -5 || true)
   if [ -n "$found" ]; then
     printf '  \033[31m✗\033[0m %s: %s\n' "$1" "$(echo "$found" | tr '\n' ' ')" >&2
     fail=1
@@ -144,6 +154,16 @@ check "личная почта" "[A-Za-z0-9._%+-]+@(gmail|yandex|mail|outlook|ic
 check "приватные ключи" "BEGIN [A-Z ]*PRIVATE KEY"
 check "присвоенные секреты" "^[A-Z_]{4,}=[A-Za-z0-9+/]{20,}$"
 check "пароли и токены значением" "(password|secret|token|api_key)[\"']?[[:space:]]*[:=][[:space:]]*[\"'][A-Za-z0-9+/_-]{12,}[\"']"
+# Кто подписан под уже опубликованными коммитами: это уезжает в GitHub и видно всем.
+if [ -d "$OUT/.git" ] && (cd "$OUT" && git rev-parse -q --verify HEAD >/dev/null 2>&1); then
+  WHO=$(cd "$OUT" && git log --format='%an <%ae>%n%cn <%ce>' | sort -u)
+  if printf '%s' "$WHO" | grep -qE "@(gmail|yandex|mail|outlook|icloud)\."; then
+    printf '  \033[31m✗\033[0m подпись коммитов: %s\n' "$(printf '%s' "$WHO" | tr '\n' ' ')" >&2
+    fail=1
+  else
+    ok "подпись коммитов: $(printf '%s' "$WHO" | tr '\n' ' ')"
+  fi
+fi
 [ "$fail" = 0 ] || die "экспорт остановлен: сначала уберите найденное"
 
 # 6. Проверки самой платформы на чистом дереве: контракт допуска должен проходить и без тулов.
@@ -152,9 +172,21 @@ say "контракт допуска на чистом дереве"
 
 # 7. Репозиторий под пуш: история одна, чужой e-mail в неё не попадает.
 say "git"
-(cd "$OUT" && git init -q -b main && git add -A)
+(cd "$OUT" && { [ -d .git ] || git init -q -b main; } && git add -A)
 SIZE=$(du -sh "$OUT" | cut -f1)
-cat <<TEXT
+if [ -n "$KEEP_GIT" ]; then
+  CHANGED=$(cd "$OUT" && git diff --cached --name-only | wc -l | tr -d ' ')
+  cat <<TEXT
+
+Готово: $OUT ($SIZE). Это обновление уже опубликованного репозитория: изменённых файлов — $CHANGED.
+
+  cd $OUT
+  git -c user.name="<имя>" -c user.email="<почта>" commit -m "<что изменилось>"
+  git push
+
+TEXT
+else
+  cat <<TEXT
 
 Готово: $OUT ($SIZE, $(cd "$OUT" && git diff --cached --name-only | wc -l | tr -d ' ') файлов в индексе)
 
@@ -168,3 +200,6 @@ cat <<TEXT
 
 Перед пушем загляните в $OUT/README.md и $OUT/NOTICE: там имя владельца копирайта и описание репозитория.
 TEXT
+fi
+
+# Пуш в GitHub может упереться в право `workflow` у токена gh: файл .github/workflows публикуется отдельно.

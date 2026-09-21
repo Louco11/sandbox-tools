@@ -8,16 +8,7 @@
  * Отзыв действует сразу: проверка идёт в базу на каждом вызове, кэша ключей нет.
  */
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
-import pg from 'pg';
-
-const pool = new pg.Pool({
-  host: process.env.PG_HOST ?? 'postgres',
-  port: Number(process.env.PG_PORT ?? 5432),
-  database: process.env.PG_DATABASE ?? 'sources',
-  user: 'identity_service',
-  password: process.env.PG_IDENTITY_PASSWORD ?? '',
-  max: 4,
-});
+import { service as pool } from './db.ts';
 
 const DEFAULT_DAYS = Number(process.env.MCP_KEY_DAYS ?? 90);
 /** Сколько ещё живёт прежний ключ после перевыпуска человеком: чтобы агент не умер посреди работы. */

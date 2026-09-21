@@ -36,11 +36,13 @@ export type Directory = z.infer<typeof directorySchema>;
 /** Администраторы и одобряющие песочницы — группы с этими именами. Человек стенда в них входит всегда. */
 export const ADMINS = 'sandbox-admins';
 export const APPROVERS = 'sandbox-approvers';
+/** Кто собирает тулы агентом (шаг Б6): без этой группы build-time агент не получит доступа к репозиторию. */
+export const DEVELOPERS = 'sandbox-developers';
 
 export function parseDirectory(text: string, human?: string): Directory {
   const dir = directorySchema.parse(parse(text) ?? { version: 1 });
   if (human) {
-    for (const g of [ADMINS, APPROVERS]) {
+    for (const g of [ADMINS, APPROVERS, DEVELOPERS]) {
       const group = (dir.groups[g] ??= { members: [] });
       if (!group.members.includes(human)) group.members.push(human);
     }

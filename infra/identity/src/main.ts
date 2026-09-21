@@ -18,7 +18,8 @@ import { randomUUID, createHash, randomBytes, createPublicKey } from 'node:crypt
 import { SignJWT, jwtVerify, exportJWK, exportPKCS8, importPKCS8, generateKeyPair, createRemoteJWKSet, type JWTPayload } from 'jose';
 import { bootstrap, groupsOf, waitForKeycloak } from './keycloak.ts';
 import { auditKey, checkKey, GRACE_HOURS, issueKey, listKeys, revokeAll, revokeKey, type KeyRow } from './keys.ts';
-import { loadDirectory, ADMINS, APPROVERS } from '@sandbox/manifest';
+import { dropForgeTokens, FORGE_TOKEN_HOURS, forgeToken, remoteScript, sweepForgeTokens } from './forge.ts';
+import { loadDirectory, ADMINS, APPROVERS, DEVELOPERS } from '@sandbox/manifest';
 
 const PORT = Number(process.env.PORT ?? 8080);
 const DOMAIN = process.env.SANDBOX_DOMAIN ?? 'tools.localhost';
@@ -343,6 +344,52 @@ async function devicePoll(req: http.IncomingMessage, res: http.ServerResponse) {
 }
 
 /**
+ * Доступ агента к репозиторию (шаг Б6). Агент приходит с личным ключом своего человека и получает
+ * короткоживущий токен бота `<логин>-agent`: пароля администратора Gitea на машине разработчика больше нет,
+ * а в истории репозитория видно, чей агент пушил. Без группы `sandbox-developers` — отказ.
+ */
+async function forgeApi(req: http.IncomingMessage, res: http.ServerResponse) {
+  const bearer = (req.headers.authorization ?? '').replace(/^Bearer /i, '').trim();
+  const key = bearer
+    ? await checkKey(bearer, { agent: req.headers['user-agent'], ip: (req.headers['x-forwarded-for'] as string | undefined)?.split(',')[0]?.trim() })
+    : null;
+  if (!key) {
+    return json(res, 401, { error: 'нужен личный ключ MCP: bin/sandbox-mcp login' });
+  }
+  const groups = await freshGroups(key.owner);
+  if (!groups.includes(DEVELOPERS)) {
+    await auditKey({ actor: key.owner, operation: 'forge.token', allowed: false, reason: `нет группы ${DEVELOPERS}` });
+    return json(res, 403, {
+      error: `собирать тулы агентом может тот, кто состоит в группе ${DEVELOPERS}. Попросите администратора песочницы добавить вас`,
+    });
+  }
+  try {
+    const token = await forgeToken(key.owner);
+    await auditKey({ actor: key.owner, operation: 'forge.token', allowed: true, reason: `агент ${token.user}, ключ ${key.prefix}` });
+    return json(res, 200, { ...token, owner: key.owner, hours: FORGE_TOKEN_HOURS });
+  } catch (e) {
+    await auditKey({ actor: key.owner, operation: 'forge.token', allowed: false, reason: (e as Error).message });
+    return json(res, 502, { error: (e as Error).message });
+  }
+}
+
+/** Скрипт рабочей копии — по личному ключу: репозиторий закрыт, а пароля учётной записи на ноутбуке нет. */
+async function remoteApi(req: http.IncomingMessage, res: http.ServerResponse) {
+  const bearer = (req.headers.authorization ?? '').replace(/^Bearer /i, '').trim();
+  const key = bearer ? await checkKey(bearer, { agent: req.headers['user-agent'] }) : null;
+  if (!key) return json(res, 401, { error: 'нужен личный ключ MCP: выпишите его в кабинете /me' });
+  if (!(await freshGroups(key.owner)).includes(DEVELOPERS)) {
+    return json(res, 403, { error: `рабочая копия — для группы ${DEVELOPERS}` });
+  }
+  try {
+    const script = await remoteScript();
+    res.writeHead(200, { 'Content-Type': 'text/x-shellscript; charset=utf-8' }).end(script);
+  } catch (e) {
+    json(res, 502, { error: (e as Error).message });
+  }
+}
+
+/**
  * Кабинет ключей. Выпускать и отзывать можно только из браузера (канал web): агент своим ключом новых ключей
  * себе не выпишет. Администратор песочницы может отозвать чужие ключи — например, при утечке.
  */
@@ -380,7 +427,10 @@ async function keysApi(req: http.IncomingMessage, url: URL, res: http.ServerResp
     if (prefix === 'all') {
       const owner = url.searchParams.get('owner') ?? me;
       if (owner !== me && !isAdmin) return json(res, 403, { error: 'отзывать чужие ключи может только администратор' });
-      return json(res, 200, { revoked: await revokeAll({ owner, by: me, reason: url.searchParams.get('reason') ?? 'отзыв всех ключей' }) });
+      const revoked = await revokeAll({ owner, by: me, reason: url.searchParams.get('reason') ?? 'отзыв всех ключей' });
+      // Отзыв ключей обрывает и доступ агента этого человека к репозиторию — иначе отзыв только наполовину.
+      await dropForgeTokens(owner, 'отозваны все ключи человека').catch(() => 0);
+      return json(res, 200, { revoked });
     }
     const ok = await revokeKey({ prefix, by: me, owner: isAdmin ? undefined : me, reason: url.searchParams.get('reason') ?? 'отозван владельцем' });
     if (!ok) await auditKey({ actor: me, operation: 'key.revoke', allowed: false, reason: `ключ ${prefix}: не найден или чужой` });
@@ -416,6 +466,8 @@ const server = http.createServer(async (req, res) => {
     if (url.pathname === '/login') return void (await login(url, res));
     if (url.pathname === '/callback') return void (await callback(req, url, res));
     if (url.pathname === '/keys' || url.pathname.startsWith('/keys/')) return void (await keysApi(req, url, res));
+    if (url.pathname === '/forge/token' && req.method === 'POST') return void (await forgeApi(req, res));
+    if (url.pathname === '/remote.sh' && req.method === 'GET') return void (await remoteApi(req, res));
     if (req.method === 'POST' && url.pathname === '/device/start') return void (await deviceStart(res));
     if (req.method === 'POST' && url.pathname === '/device/poll') return void (await devicePoll(req, res));
     if (url.pathname === '/logout') {
@@ -442,7 +494,7 @@ const server = http.createServer(async (req, res) => {
 // ---------- запуск: сначала IdP, потом приём запросов --------------------------------------------
 
 const directory = loadDirectory(DIRECTORY_PATH, HUMAN);
-const people: Record<string, string[]> = { [HUMAN]: [ADMINS, APPROVERS] };
+const people: Record<string, string[]> = { [HUMAN]: [ADMINS, APPROVERS, DEVELOPERS] };
 for (const [login, p] of Object.entries(directory.people)) {
   if (p.active === false) continue; // ушедших в IdP не заводим: вход им не нужен
   people[login] ??= [];
@@ -457,7 +509,18 @@ await bootstrap({
   redirectUris: [`${SELF}/callback`, `${BASE}/*`, `http://*.${DOMAIN}:${PUBLIC_PORT}/*`],
   human: HUMAN,
   humanTempPassword: process.env.KEYCLOAK_HUMAN_PASSWORD ?? 'sandbox',
+  extraClients: process.env.GITEA_OIDC_SECRET
+    ? [{
+        clientId: 'gitea',
+        name: 'Gitea песочницы',
+        secret: process.env.GITEA_OIDC_SECRET,
+        redirectUris: [`${process.env.GITEA_PUBLIC_URL ?? 'http://localhost:13000'}/user/oauth2/sandbox/callback`],
+      }]
+    : [],
   demoPassword: process.env.KEYCLOAK_DEMO_PASSWORD ?? 'sandbox',
   people,
 });
+// Просроченные токены агентов удаляются сами: срок должен что-то значить.
+setInterval(() => void sweepForgeTokens().catch((e: Error) => log({ type: 'forge_sweep_failed', error: e.message })), 10 * 60_000).unref();
+
 server.listen(PORT, () => log({ type: 'started', port: PORT, issuer: ISSUER, idp: KEYCLOAK_PUBLIC, people: Object.keys(people).length }));

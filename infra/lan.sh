@@ -68,12 +68,15 @@ case "${1:-}" in
   Gitea:    http://$host:13000/platform/internal-tools
   Тулы:     http://<тул>.$domain:18000
 
-! SSO — заглушка: любой в этой сети может войти в тул под любым логином. Только доверенная сеть, только для тестов.
+! Стенд слушает всю локальную сеть. Вход настоящий (IdP), но сеть должна быть доверенной.
 
-На ноутбуке — рабочая копия для агента, подключённая к этому стенду (второй стенд там не поднимается):
+На ноутбуке — рабочая копия для агента, подключённая к этому стенду (второй стенд там не поднимается).
+Сначала выпишите себе личный ключ в кабинете http://$domain:18000/me, затем:
 
-  curl -fsu '$GITEA_AGENT_USER:$GITEA_AGENT_PASSWORD' http://$host:13000/platform/internal-tools/raw/branch/main/infra/remote.sh \\
-    | GITEA_AGENT_PASSWORD='$GITEA_AGENT_PASSWORD' sh -s -- $host $domain
+  export SANDBOX_MCP_KEY=sbx_…
+  curl -fsS -H \"Authorization: Bearer \$SANDBOX_MCP_KEY\" http://id.$domain:18000/remote.sh | sh -s -- $host $domain
+
+  Ключ — ваш личный: пароли учётных записей на ноутбук не уезжают (шаг Б6).
 
 Вернуть стенд только на это устройство: make local
 EOF

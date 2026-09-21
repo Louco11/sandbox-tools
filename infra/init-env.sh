@@ -66,6 +66,8 @@ ensure NOTIFY_REAPER_TOKEN "$(secret 24)"
 ensure NOTIFY_DEPLOYER_TOKEN "$(secret 24)"
 ensure NOTIFY_PORTAL_TOKEN "$(secret 24)"    # главная: входящие человека
 # Деплоер читает репозиторий и пишет статус выкатки коммита.
+# Вход в Gitea через тот же IdP (шаг Б6): клиент конфиденциальный, секрет живёт только на сервере.
+ensure GITEA_OIDC_SECRET "$(secret 24)"
 ensure GITEA_DEPLOYER_USER sandbox-deployer
 ensure GITEA_DEPLOYER_PASSWORD "$(secret 16)"
 # Стенд различается по id: бэкап своего стенда восстанавливается целиком, чужого — без тулов (infra/backup).

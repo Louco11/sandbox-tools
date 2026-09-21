@@ -9,7 +9,13 @@ import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js'
 const [tool, args = '{}'] = process.argv.slice(2);
 const client = new Client({ name: 'sandbox-cli', version: '1.0.0' });
 await client.connect(
-  new StdioClientTransport({ command: 'node', args: ['--disable-warning=ExperimentalWarning', 'mcp-sandbox/src/main.ts'] }),
+  // Окружение передаём явно: MCP-клиент по умолчанию отдаёт серверу урезанный набор переменных,
+  // а ключ человека (SANDBOX_MCP_KEY) в терминале обычно задают именно переменной.
+  new StdioClientTransport({
+    command: 'node',
+    args: ['--disable-warning=ExperimentalWarning', 'mcp-sandbox/src/main.ts'],
+    env: process.env as Record<string, string>,
+  }),
 );
 if (!tool) {
   for (const t of (await client.listTools()).tools) console.log(`${t.name.padEnd(18)} ${t.description}`);

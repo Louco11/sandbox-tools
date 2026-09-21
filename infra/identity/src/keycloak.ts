@@ -6,6 +6,13 @@
 const ADMIN_USER = process.env.KEYCLOAK_ADMIN_USER ?? 'admin';
 const ADMIN_PASSWORD = process.env.KEYCLOAK_ADMIN_PASSWORD ?? '';
 
+export interface ExtraClient {
+  clientId: string;
+  secret: string;
+  redirectUris: string[];
+  name?: string;
+}
+
 export interface KeycloakConfig {
   url: string;
   realm: string;
@@ -16,6 +23,8 @@ export interface KeycloakConfig {
   demoPassword: string;
   /** Логин → группы. Берётся из справочника сотрудников. */
   people: Record<string, string[]>;
+  /** Конфиденциальные клиенты сторонних сервисов: Gitea входит через тот же IdP (шаг Б6). */
+  extraClients?: ExtraClient[];
 }
 
 const log = (event: Record<string, unknown>) => console.log(JSON.stringify({ at: new Date().toISOString(), ...event }));
@@ -95,6 +104,32 @@ export async function bootstrap(cfg: KeycloakConfig): Promise<void> {
       name: 'groups', protocol: 'openid-connect', protocolMapper: 'oidc-group-membership-mapper',
       config: { 'claim.name': 'groups', 'full.path': 'false', 'id.token.claim': 'true', 'access.token.claim': 'true', 'userinfo.token.claim': 'true' },
     });
+  }
+
+  // Конфиденциальные клиенты: свой секрет, свой маппер групп — Gitea сопоставляет группы с командами.
+  for (const extra of cfg.extraClients ?? []) {
+    const found = (await api('GET', `/${cfg.realm}/clients?clientId=${extra.clientId}`)) as { id: string }[];
+    const body = {
+      clientId: extra.clientId,
+      name: extra.name ?? extra.clientId,
+      publicClient: false,
+      secret: extra.secret,
+      standardFlowEnabled: true,
+      directAccessGrantsEnabled: false,
+      redirectUris: extra.redirectUris,
+      webOrigins: ['+'],
+    };
+    if (found.length) await api('PUT', `/${cfg.realm}/clients/${found[0]!.id}`, { ...body, id: found[0]!.id });
+    else await api('POST', `/${cfg.realm}/clients`, body);
+    const id = ((await api('GET', `/${cfg.realm}/clients?clientId=${extra.clientId}`)) as { id: string }[])[0]!.id;
+    const ms = (await api('GET', `/${cfg.realm}/clients/${id}/protocol-mappers/models`)) as { name: string }[];
+    if (!ms.some((m) => m.name === 'groups')) {
+      await api('POST', `/${cfg.realm}/clients/${id}/protocol-mappers/models`, {
+        name: 'groups', protocol: 'openid-connect', protocolMapper: 'oidc-group-membership-mapper',
+        config: { 'claim.name': 'groups', 'full.path': 'false', 'id.token.claim': 'true', 'access.token.claim': 'true', 'userinfo.token.claim': 'true' },
+      });
+    }
+    log({ type: 'client_ready', client: extra.clientId });
   }
 
   const groups = new Set(Object.values(cfg.people).flat());

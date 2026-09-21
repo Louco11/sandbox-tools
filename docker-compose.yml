@@ -43,6 +43,8 @@ services:
       PG_PASTRY_ORDER_UPDATE_PASSWORD: ${PG_PASTRY_ORDER_UPDATE_PASSWORD:?run make env}
       PG_PASTRY_ORDER_START_BAKING_PASSWORD: ${PG_PASTRY_ORDER_START_BAKING_PASSWORD:?run make env}
       PG_GATEWAY_PASSWORD: ${PG_GATEWAY_PASSWORD}
+      # Схемы identity создаёт тот же init/migrate: пароль роли нужен и здесь.
+      PG_IDENTITY_PASSWORD: ${PG_IDENTITY_PASSWORD}
     volumes:
       - pgdata:/var/lib/postgresql/data
       - ./infra/postgres/init:/docker-entrypoint-initdb.d:ro
@@ -126,7 +128,7 @@ services:
       - "${SANDBOX_BIND:-127.0.0.1}:12222:22"
     volumes:
       - gitea-data:/data
-    networks: [ci]
+    networks: [ci, control]   # control — чтобы сервис личности заводил ботов агентов, не выходя в интернет
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://localhost:3000/api/healthz >/dev/null"]
       interval: 3s
@@ -419,6 +421,14 @@ services:
       # Группы песочницы кладёт в личность гейтвей: решение о правах остаётся у него.
       GATEWAY_URL: http://gateway:8080
       GATEWAY_IDENTITY_TOKEN: ${GATEWAY_IDENTITY_TOKEN:?run make env}
+      # Шаг Б6: агент получает доступ к репозиторию от имени своего человека, а учётка администратора Gitea
+      # живёт здесь, на сервере, — не на машине разработчика.
+      GITEA_URL: http://gitea:3000
+      GITEA_ADMIN_USER: ${GITEA_ADMIN_USER:-sandbox-admin}
+      GITEA_ADMIN_PASSWORD: ${GITEA_ADMIN_PASSWORD:?run make env}
+      GITEA_PUBLIC_URL: http://${SANDBOX_HOST:-localhost}:13000
+      GITEA_OIDC_SECRET: ${GITEA_OIDC_SECRET:-}
+      FORGE_TOKEN_HOURS: ${FORGE_TOKEN_HOURS:-4}
     volumes:
       - ./registry:/registry:ro
       - identity-state:/state

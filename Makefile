@@ -1,4 +1,4 @@
-.PHONY: setup stand lan local demo-identity demo-groups demo-access demo-data-rights demo-notify demo-connector validate-connector up bundle backup backup-verify backup-schedule restore migrate down reset ps logs psql env demo-gateway ci-image check deploy tools extend revoke agents
+.PHONY: setup stand demo-forge lan local demo-identity demo-groups demo-access demo-data-rights demo-notify demo-connector validate-connector up bundle backup backup-verify backup-schedule restore migrate down reset ps logs psql env demo-gateway ci-image check deploy tools extend revoke agents
 
 # Команды стенда — только на сервере. Рабочая копия из infra/remote.sh стенда не имеет и второй не поднимает.
 stand:
@@ -34,6 +34,7 @@ migrate: stand env ## Досоздать новые источники и гра
 	docker compose exec -T postgres sh /docker-entrypoint-initdb.d/09-groups.sh
 	docker compose exec -T postgres sh /docker-entrypoint-initdb.d/10-tool-access.sh
 	docker compose exec -T postgres sh /docker-entrypoint-initdb.d/11-access-requests.sh
+	docker compose exec -T postgres sh /docker-entrypoint-initdb.d/12-forge-tokens.sh
 	docker compose up -d --build --wait gateway
 
 env:
@@ -74,6 +75,9 @@ demo-access: stand ## Демо доступа: тул открыт кругу л
 
 demo-data-rights: stand ## Демо прав на данные: чувствительные поля, фильтр строк, запись по группам
 	./infra/demo/data-rights.sh
+
+demo-forge: stand ## Демо Б6: у каждого человека свой агент в репозитории, пароля учётки на машине нет
+	@./infra/demo/forge.sh
 
 demo-notify: stand ## Демо уведомлений и справочника: простой, срок, ушедший владелец, группа, ничей тул
 	./infra/demo/notify.sh

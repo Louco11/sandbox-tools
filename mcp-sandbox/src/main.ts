@@ -18,6 +18,7 @@ import { stringify } from 'yaml';
 import { z } from 'zod';
 import { UI_MODES, loadRegistry, validateManifest } from '@sandbox/manifest';
 import { sync as syncAgentConfigs } from '../../infra/agents/sync.ts';
+import { loadKey, KEY_ENV } from '../../infra/mcp-key.ts';
 
 const ROOT = resolve(import.meta.dirname, '..', '..');
 
@@ -60,16 +61,50 @@ const guard = async (fn: () => Promise<ReturnType<typeof ok | typeof fail>>) => 
 const toolDir = (name: string) => join(ROOT, 'tools', name);
 const nameSchema = z.string().regex(/^[a-z][a-z0-9]*(-[a-z0-9]+)*$/).min(3).max(40);
 
-// ---------- Gitea CI ---------------------------------------------------------------
+// ---------- доступ к репозиторию: от имени человека, а не общей учётки ---------------------------
 
-// Агент работает в Gitea под своей учётной записью: пушит ветки и открывает PR, в main не пишет —
-// main защищён, мерж только после одобрения человеком.
-const agentAuth = () => Buffer.from(`${env('GITEA_AGENT_USER')}:${env('GITEA_AGENT_PASSWORD')}`).toString('base64');
+/**
+ * Шаг Б6: у каждого человека свой бот `<логин>-agent`. Агент приходит с личным ключом человека
+ * (`bin/sandbox-mcp login`), сервис личности проверяет группу `sandbox-developers` и выдаёт короткоживущий
+ * токен бота. Пароля администратора Gitea и общей учётки `sandbox-agent` на машине разработчика больше нет,
+ * а в истории репозитория видно, чей агент пушил.
+ */
+const IDENTITY_URL = process.env.IDENTITY_URL ?? `http://id.${DOMAIN}:${PUBLIC_PORT}`;
+interface Forge { user: string; token: string; expires_at: string; owner: string }
+let forge: Forge | null = null;
+
+async function forgeAccess(): Promise<Forge> {
+  if (forge && new Date(forge.expires_at).getTime() > Date.now() + 60_000) return forge;
+  const key = loadKey(`${DOMAIN}:${PUBLIC_PORT}`);
+  if (!key) {
+    throw new Error(
+      `нет личного ключа MCP. Один раз выполните: bin/sandbox-mcp login\n`
+      + `Ключ ляжет в Keychain (или ~/.sandbox); в конфигах агента его нет. Можно передать и через ${KEY_ENV}.`,
+    );
+  }
+  const res = await fetch(`${IDENTITY_URL}/forge/token`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${key}` },
+    signal: AbortSignal.timeout(15_000),
+  }).catch((e: Error) => {
+    throw new Error(`сервис личности недоступен (${IDENTITY_URL}): ${e.message}`);
+  });
+  const body = (await res.json().catch(() => ({}))) as { error?: string } & Forge;
+  if (!res.ok) throw new Error(body.error ?? `сервис личности: ${res.status}`);
+  forge = body;
+  return body;
+}
+
+/** Для Gitea и деплоера — Basic с токеном бота: так же, как человек ходил бы своей учёткой. */
+const forgeAuth = async () => {
+  const f = await forgeAccess();
+  return Buffer.from(`${f.user}:${f.token}`).toString('base64');
+};
 
 async function gitea<T>(path: string, init?: { method: string; body: unknown }): Promise<T> {
   const res = await fetch(`${GITEA_URL}/api/v1/repos/${REPO}${path}`, {
     method: init?.method ?? 'GET',
-    headers: { Authorization: `Basic ${agentAuth()}`, 'Content-Type': 'application/json' },
+    headers: { Authorization: `Basic ${await forgeAuth()}`, 'Content-Type': 'application/json' },
     body: init ? JSON.stringify(init.body) : undefined,
   });
   if (!res.ok) throw new Error(`Gitea ${path}: ${res.status} ${await res.text().catch(() => '')}`.trim());
@@ -322,7 +357,7 @@ server.registerTool(
 
       const sha = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: ROOT, encoding: 'utf8' }).trim();
       const push = run('git', [
-        '-c', 'credential.helper=', '-c', `http.extraHeader=Authorization: Basic ${agentAuth()}`,
+        '-c', 'credential.helper=', '-c', `http.extraHeader=Authorization: Basic ${await forgeAuth()}`,
         'push', '-f', `${GITEA_URL}/${REPO}.git`, `HEAD:refs/heads/preview/${name}`,
       ]);
       if (!push.ok) return fail(`git push не прошёл:\n${push.out}`);
@@ -362,7 +397,7 @@ server.registerTool(
       // Логи — через деплоер, а не локальный docker: агент может работать с другого устройства.
       const instance = preview ? `${name}--preview` : name;
       const container = `tool-${instance}`;
-      const res = await fetch(`${DEPLOYER_URL}/logs/${instance}?lines=${lines}`, { headers: { Authorization: `Basic ${agentAuth()}` } })
+      const res = await fetch(`${DEPLOYER_URL}/logs/${instance}?lines=${lines}`, { headers: { Authorization: `Basic ${await forgeAuth()}` } })
         .catch(() => null);
       if (!res) throw new Error(`деплоер недоступен (${DEPLOYER_URL})`);
       const body = (await res.json()) as { state?: string; logs?: string; message?: string };
@@ -420,7 +455,8 @@ server.registerTool(
         '',
         preview ? `**Превью:** ${preview}` : `**Превью:** тулы, затронутые веткой, выкачены деплоером как \`<тул>--<ветка>.${DOMAIN}:18000\``,
         '',
-        'Открыто агентом через mcp-sandbox. Мерж — только после одобрения человеком и зелёного CI.',
+        `Открыто агентом ${(await forgeAccess()).user} от имени ${(await forgeAccess()).owner} через mcp-sandbox.`,
+        'Мерж — только после одобрения человеком и зелёного CI. Свой PR автор не одобряет.',
       ].join('\n');
       const pr = await gitea<PullRequest>('/pulls', { method: 'POST', body: { head, base: 'main', title, body } });
       return ok({ status: 'открыт', pr: pr.html_url, preview, next: 'человек смотрит превью, одобряет и мержит PR в Gitea; после мержа деплоер выкатит прод' });

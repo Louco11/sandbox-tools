@@ -89,6 +89,35 @@ if ! user_exists "$GITEA_HUMAN_USER"; then
 fi
 collaborator "$GITEA_HUMAN_USER"
 
+# Вход в Gitea — тот же IdP (шаг Б6): учётка человека = его SSO, группы из личности раскладываются по командам.
+# Секрет клиента живёт в .env сервера; на машине разработчика его нет.
+echo "→ команда одобряющих platform/approvers"
+if ! exists "$GITEA/api/v1/orgs/$ORG/teams/search?q=approvers&limit=1" || \
+   [ "$(api "$GITEA/api/v1/orgs/$ORG/teams/search?q=approvers&limit=1" | grep -c '"name":"approvers"')" = 0 ]; then
+  api -X POST "$GITEA/api/v1/orgs/$ORG/teams" -d '{
+    "name":"approvers","description":"Одобряют PR в main","permission":"write",
+    "units":["repo.code","repo.pulls","repo.issues"],"includes_all_repositories":true
+  }' >/dev/null || true
+fi
+
+if [ -n "${GITEA_OIDC_SECRET:-}" ]; then
+  echo "→ вход через IdP песочницы"
+  AUTH_NAME=sandbox
+  DISCOVERY="http://keycloak:8080/realms/${KEYCLOAK_REALM:-sandbox}/.well-known/openid-configuration"
+  # Группа sandbox-approvers из личности → команда platform/approvers. Состав пересчитывается на каждом входе.
+  GROUP_MAP='{"sandbox-approvers":{"platform":["approvers"]}}'
+  if docker compose exec -T -u git gitea gitea admin auth list 2>/dev/null | grep -q "	$AUTH_NAME	"; then
+    ID=$(docker compose exec -T -u git gitea gitea admin auth list 2>/dev/null | awk -v n="$AUTH_NAME" '$2 == n {print $1}')
+    docker compose exec -T -u git gitea gitea admin auth update-oauth --id "$ID" \
+      --key gitea --secret "$GITEA_OIDC_SECRET" --auto-discover-url "$DISCOVERY" >/dev/null
+  else
+    docker compose exec -T -u git gitea gitea admin auth add-oauth \
+      --name "$AUTH_NAME" --provider openidConnect --key gitea --secret "$GITEA_OIDC_SECRET" \
+      --auto-discover-url "$DISCOVERY" --scopes "openid profile email groups" \
+      --group-claim-name groups --group-team-map "$GROUP_MAP" --group-team-map-removal >/dev/null
+  fi
+fi
+
 echo "→ защита main: без прямого пуша, мерж через PR после одобрения человеком и зелёного CI"
 PROTECTION=$(cat <<JSON
 {
@@ -96,9 +125,11 @@ PROTECTION=$(cat <<JSON
   "enable_push": false,
   "enable_merge_whitelist": true,
   "merge_whitelist_usernames": ["$GITEA_HUMAN_USER"],
+  "merge_whitelist_teams": ["approvers"],
   "required_approvals": 1,
   "enable_approvals_whitelist": true,
   "approvals_whitelist_username": ["$GITEA_HUMAN_USER"],
+  "approvals_whitelist_teams": ["approvers"],
   "enable_status_check": true,
   "status_check_contexts": ["tools / pipeline (push)"],
   "block_on_rejected_reviews": true,
