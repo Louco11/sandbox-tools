@@ -20,6 +20,7 @@ services:
       POSTGRES_DB: sources
       POSTGRES_USER: sources_admin
       POSTGRES_PASSWORD: ${PG_ADMIN_PASSWORD:?run make env}
+      PG_GATEWAY_PASSWORD: ${PG_GATEWAY_PASSWORD}
       PG_TASKS_READONLY_PASSWORD: ${PG_TASKS_READONLY_PASSWORD:?run make env}
       PG_KNOWLEDGE_READONLY_PASSWORD: ${PG_KNOWLEDGE_READONLY_PASSWORD:?run make env}
       PG_TASKS_CREATE_PASSWORD: ${PG_TASKS_CREATE_PASSWORD:?run make env}
@@ -42,12 +43,14 @@ services:
       PG_PASTRY_ORDER_CREATE_PASSWORD: ${PG_PASTRY_ORDER_CREATE_PASSWORD:?run make env}
       PG_PASTRY_ORDER_UPDATE_PASSWORD: ${PG_PASTRY_ORDER_UPDATE_PASSWORD:?run make env}
       PG_PASTRY_ORDER_START_BAKING_PASSWORD: ${PG_PASTRY_ORDER_START_BAKING_PASSWORD:?run make env}
-      PG_GATEWAY_PASSWORD: ${PG_GATEWAY_PASSWORD}
+      # Демо-слой: наливается только при SANDBOX_DEMO=1 (make demo-on).
+      SANDBOX_DEMO: ${SANDBOX_DEMO:-0}
       # Схемы identity создаёт тот же init/migrate: пароль роли нужен и здесь.
       PG_IDENTITY_PASSWORD: ${PG_IDENTITY_PASSWORD}
     volumes:
       - pgdata:/var/lib/postgresql/data
       - ./infra/postgres/init:/docker-entrypoint-initdb.d:ro
+      - ./infra/postgres/demo:/demo:ro
     networks: [data]
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U sources_admin -d sources"]
@@ -68,11 +71,6 @@ services:
       PG_HOST: postgres
       PG_GATEWAY_PASSWORD: ${PG_GATEWAY_PASSWORD:?run make env}
       # Токены коннекторов (token_env в реестре): по ним коннектор узнаёт гейтвей.
-      CONNECTOR_TASKS_TOKEN: ${CONNECTOR_TASKS_TOKEN:?run make env}
-      CONNECTOR_KNOWLEDGE_TOKEN: ${CONNECTOR_KNOWLEDGE_TOKEN:?run make env}
-      CONNECTOR_BOARDS_TOKEN: ${CONNECTOR_BOARDS_TOKEN:?run make env}
-      CONNECTOR_PASTRY_TOKEN: ${CONNECTOR_PASTRY_TOKEN:?run make env}
-      CONNECTOR_SUPPLIERS_TOKEN: ${CONNECTOR_SUPPLIERS_TOKEN:?run make env}
       GATEWAY_JWT_SECRET: ${GATEWAY_JWT_SECRET:?run make env}
       GATEWAY_ADMIN_TOKEN: ${GATEWAY_ADMIN_TOKEN:?run make env}
       GATEWAY_DEPLOY_TOKEN: ${GATEWAY_DEPLOY_TOKEN:?run make env}
@@ -80,7 +78,13 @@ services:
       GATEWAY_PORTAL_TOKEN: ${GATEWAY_PORTAL_TOKEN:?run make env}
       GATEWAY_NOTIFIER_TOKEN: ${GATEWAY_NOTIFIER_TOKEN:?run make env}
       GATEWAY_IDENTITY_TOKEN: ${GATEWAY_IDENTITY_TOKEN:?run make env}
+      CONNECTOR_TASKS_TOKEN: ${CONNECTOR_TASKS_TOKEN:?run make env}
+      CONNECTOR_KNOWLEDGE_TOKEN: ${CONNECTOR_KNOWLEDGE_TOKEN:?run make env}
+      CONNECTOR_BOARDS_TOKEN: ${CONNECTOR_BOARDS_TOKEN:?run make env}
+      CONNECTOR_PASTRY_TOKEN: ${CONNECTOR_PASTRY_TOKEN:?run make env}
+      CONNECTOR_SUPPLIERS_TOKEN: ${CONNECTOR_SUPPLIERS_TOKEN:?run make env}
       REGISTRY_PATH: /registry/sources.yaml
+      SANDBOX_DEMO: ${SANDBOX_DEMO:-0}
       # Справочник сотрудников (заглушка HR/IdP): кто решает за владельца, кому уведомления. Человек стенда — админ.
       DIRECTORY_PATH: /registry/directory.yaml
       SANDBOX_HUMAN: ${GITEA_HUMAN_USER:-}
@@ -192,9 +196,12 @@ services:
       traefik.http.services.deployer.loadbalancer.server.port: "8080"
     restart: unless-stopped
 
+  # ---------- демо-слой: источники, на которых песочницу можно потрогать (SANDBOX_DEMO=1) ----------
+
   # Коннекторы источников postgres стенда (connectors/postgres): один образ, экземпляр на источник. У каждого — только
   # роли своего источника с минимальными грантами; видит гейтвей (sources) и Postgres (data), больше ничего.
   connector-tasks:
+    profiles: [demo]        # поднимается только с демо-слоем: make demo-on
     build:
       context: .
       dockerfile: connectors/postgres/Dockerfile
@@ -212,6 +219,7 @@ services:
     restart: unless-stopped
 
   connector-knowledge:
+    profiles: [demo]        # поднимается только с демо-слоем: make demo-on
     build:
       context: .
       dockerfile: connectors/postgres/Dockerfile
@@ -228,6 +236,7 @@ services:
     restart: unless-stopped
 
   connector-boards:
+    profiles: [demo]        # поднимается только с демо-слоем: make demo-on
     build:
       context: .
       dockerfile: connectors/postgres/Dockerfile
@@ -245,6 +254,7 @@ services:
     restart: unless-stopped
 
   connector-pastry:
+    profiles: [demo]        # поднимается только с демо-слоем: make demo-on
     build:
       context: .
       dockerfile: connectors/postgres/Dockerfile
@@ -275,6 +285,7 @@ services:
   # Коннектор источника «Поставщики» (connectors/suppliers). В компании такой сервис держит команда данных;
   # здесь — демо: подключён записью в реестре и этим сервисом, без правки gateway/. Видит только гейтвей.
   connector-suppliers:
+    profiles: [demo]        # поднимается только с демо-слоем: make demo-on
     image: node:22-bookworm-slim
     working_dir: /app
     command: ["node", "--disable-warning=ExperimentalWarning", "connectors/suppliers/server.ts"]

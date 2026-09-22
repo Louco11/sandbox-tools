@@ -1,0 +1,86 @@
+# ЧЕРНОВИК записи в реестр — предложение агента, а не решение. Одобряют ИБ и владелец данных: переносят в
+# registry/sources.yaml (approved_by — кто одобрил), заводят токен (infra/init-env.sh) и сервис коннектора
+# (docker-compose.yml, сеть sources + исходящая до хоста Petstore или своего инстанса).
+# Система: Swagger Petstore (OpenAPI 2.0, basePath /v2). API_URL / API_TOKEN — в окружении.
+# Не включено: users (пароли), uploadImage, устаревший findByTags — отдельным решением, если понадобятся.
+sources:
+  petstore-readonly:
+    title: Swagger Petstore — питомцы и склад
+    owner: ivan.petrov
+    approved_by: не одобрено
+    approved_at: не одобрено
+    kind: connector
+    connector:
+      url: http://connector-petstore:8080
+      token_env: CONNECTOR_PETSTORE_TOKEN
+    datasets:
+      pets:
+        description: "Питомцы магазина: имя, статус (available|pending|sold), категория, фото и теги"
+        fields:
+          id: public
+          name: public
+          status: internal
+          category_id: internal
+          category_name: internal
+          photo_urls: internal
+          tags: internal
+      inventory:
+        description: "Остатки по статусу питомца: сколько available / pending / sold"
+        fields:
+          status: public
+          quantity: internal
+
+writes:
+  petstore.pet:add:
+    title: Добавить питомца
+    owner: ivan.petrov
+    approved_by: не одобрено
+    approved_at: не одобрено
+    source: petstore-readonly
+    params:
+      name: { type: string }
+      status: { type: enum, values: [available, pending, sold], required: false }
+      category_name: { type: string, required: false }
+      photo_url: { type: string, required: false }
+
+  petstore.pet:update_status:
+    title: Сменить статус питомца
+    owner: ivan.petrov
+    approved_by: не одобрено
+    approved_at: не одобрено
+    source: petstore-readonly
+    params:
+      pet_id: { type: integer }
+      status: { type: enum, values: [available, pending, sold] }
+      name: { type: string, required: false }
+
+  petstore.pet:delete:
+    title: Удалить питомца
+    owner: ivan.petrov
+    approved_by: не одобрено
+    approved_at: не одобрено
+    source: petstore-readonly
+    confirm: true
+    params:
+      pet_id: { type: integer }
+
+  petstore.order:place:
+    title: Оформить заказ
+    owner: ivan.petrov
+    approved_by: не одобрено
+    approved_at: не одобрено
+    source: petstore-readonly
+    params:
+      pet_id: { type: integer }
+      quantity: { type: integer }
+      status: { type: enum, values: [placed, approved, delivered], required: false }
+
+  petstore.order:delete:
+    title: Удалить заказ
+    owner: ivan.petrov
+    approved_by: не одобрено
+    approved_at: не одобрено
+    source: petstore-readonly
+    confirm: true
+    params:
+      order_id: { type: integer }

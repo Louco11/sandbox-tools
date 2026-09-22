@@ -41,12 +41,16 @@ export const config = {
 };
 
 export const REGISTRY_PATH = process.env.REGISTRY_PATH ?? '/registry/sources.yaml';
+/** Демо-слой платформы: подмешивается, только когда SANDBOX_DEMO=1 (`make demo-on`). */
+export const REGISTRY_DEMO_PATH = process.env.SANDBOX_DEMO === '1'
+  ? process.env.REGISTRY_DEMO_PATH ?? '/registry/demo/sources.yaml'
+  : undefined;
 
 /**
  * Реестр — живая привязка: импортёры видят новое значение после reloadRegistry без перезапуска гейтвея.
  * Новый реестр применяется, только если он валиден целиком (см. main.ts); иначе работает прежний.
  */
-export let registry: Registry = loadRegistry(REGISTRY_PATH);
+export let registry: Registry = loadRegistry(REGISTRY_PATH, REGISTRY_DEMO_PATH);
 export const registryState = { loaded_at: new Date(), error: null as string | null };
 
 export function setRegistry(next: Registry): void {

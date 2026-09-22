@@ -3,7 +3,7 @@ import { statSync } from 'node:fs';
 import express, { type NextFunction, type Request, type Response } from 'express';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { ADMINS, loadRegistry, validateManifest, type Registry } from '@sandbox/manifest';
-import { REGISTRY_PATH, config, registry, registryState, setRegistry, type AdminScope } from './config.ts';
+import { REGISTRY_DEMO_PATH, REGISTRY_PATH, config, registry, registryState, setRegistry, type AdminScope } from './config.ts';
 import { audit } from './audit.ts';
 import { service } from './db.ts';
 import { HttpError, badRequest, forbidden, unauthorized } from './errors.ts';
@@ -180,7 +180,7 @@ setInterval(() => {
   if (mtime === registryMtime) return;
   registryMtime = mtime;
   try {
-    const next = loadRegistry(REGISTRY_PATH);
+    const next = loadRegistry(REGISTRY_PATH, REGISTRY_DEMO_PATH);
     const problems = registryProblems(next);
     if (problems.length) throw new Error(problems.join('; '));
     setRegistry(next);

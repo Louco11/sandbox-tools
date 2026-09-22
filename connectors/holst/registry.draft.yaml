@@ -1,0 +1,44 @@
+# ЧЕРНОВИК записи в реестр — предложение агента, а не решение. Одобряют ИБ и владелец данных: переносят в
+# registry/sources.yaml, заводят токен (infra/init-env.sh) и сервис коннектора (docker-compose.yml, сеть sources).
+# Система: Holst (holst-mcp) — совместные доски. Живой URL — переменная HOLST_MCP_URL у сервиса коннектора.
+# Не включены: import_holst/upload_assets (секреты submitUrl), скриншоты/экспорт, get_guide.
+sources:
+  holst-readonly:
+    title: Holst — рабочие пространства и доски
+    owner: ivan.petrov
+    approved_by: не одобрено
+    approved_at: не одобрено
+    kind: connector
+    connector:
+      url: http://connector-holst:8080
+      token_env: CONNECTOR_HOLST_TOKEN
+    datasets:
+      workspaces:
+        description: "Рабочие пространства Holst, в которых можно создать корневую доску"
+        fields:
+          id: public
+          name: public
+          role: internal
+
+writes:
+  holst.board:create:
+    title: Создать доску
+    owner: ivan.petrov
+    approved_by: не одобрено
+    approved_at: не одобрено
+    source: holst-readonly
+    params:
+      name: { type: string }
+      workspace_id: { type: string, required: false }
+
+  holst.board:run:
+    title: Выполнить код на доске
+    owner: ivan.petrov
+    approved_by: не одобрено
+    approved_at: не одобрено
+    source: holst-readonly
+    confirm: true
+    params:
+      board_id: { type: string }
+      code: { type: string }
+      description: { type: string }

@@ -1,134 +1,113 @@
-# Песочница внутренних тулов — локальный стенд
+# internal-tools
 
 > **В публичном репозитории тулов нет.** `tools/` пуст намеренно: у тула есть владелец, срок жизни и регистрация
 > в конкретном гейтвее, между стендами он не переезжает (`tools/README.md`). Поэтому строки таблицы, где нужен
 > готовый тул, работают после того, как вы его создадите — агентом через `scaffold_tool`; демо, которым тул не
 > нужен, заводят временный сами и убирают его за собой. Английское описание — [README.md](README.md).
 
-Контур, в котором агент за минуты собирает тул с UI над корпоративными данными, а допуск проверяет машина:
-контракт `tool.yaml`, гейтвей, CI в Gitea. Инварианты и правила для агентов — [AGENTS.md](AGENTS.md),
-план — [docs/roadmap.md](docs/roadmap.md), чек-лист проверки целиком — [docs/regress.md](docs/regress.md).
+A sandbox where an **agent builds an internal web app over corporate data in hours** — because the boundaries are
+set in advance and enforced by machine, not by review.
 
-## Запуск
+Most internal tools are one-off: a report for one quarter, a board for one migration. They never survive a
+product backlog, so people do them in spreadsheets. This gives them a legal way to exist — a narrow contract to
+get in, one audited gateway to the data, a shared framework, and a death date.
+
+Prototype, single host, Docker Compose. Full walkthrough: [README.ru.md](README.ru.md) · agent rules:
+[AGENTS.md](AGENTS.md) · plans: [docs/roadmap.md](docs/roadmap.md) (Russian).
+
+## Start
 
 ```bash
-sh infra/setup.sh        # окружение → стенд → здоровье → что делать дальше (--check: только проверка)
+sh infra/setup.sh        # checks the environment, brings the stand up, verifies it, prints what to do next
 ```
 
-Нужны Docker, Node ≥ 22.18, `jq`. Секреты создаются локально в `.env` (в git не попадает). Скрипт идемпотентен.
-Агентом: откройте каталог в Claude Code, Cursor или OpenCode и скажите «прочитай AGENTS.md и разверни песочницу».
+Needs Docker, Node ≥ 22.18, `jq`. Secrets are generated locally into `.env`. `--check` only diagnoses.
 
-| Адрес | Что там |
+Or open the repository in Claude Code, Cursor or OpenCode and say: **"read AGENTS.md and set up the sandbox"** —
+the agent runs the same script, then builds tools through the `sandbox` MCP server.
+
+| | |
 | --- | --- |
-| http://tools.localhost:18000 | главная: каталог, страница тула, «Создать тул», источники, метрики, события, кабинет, админка |
-| `http://<тул>.tools.localhost:18000` | сам тул |
-| http://auth.tools.localhost:18000 | вход (Keycloak). Ваш временный пароль — `KEYCLOAK_HUMAN_PASSWORD` в `.env`, демо-люди — `KEYCLOAK_DEMO_PASSWORD` |
-| http://localhost:13000/platform/internal-tools | Gitea: код, PR, CI |
-| http://localhost:18080/v1/registry | реестр источников |
-| http://localhost:18090/deploys/`<sha>` | лог выкатки (за входом — `deploy.tools.localhost:18000`) |
+| Portal — catalog, sources, metrics, events | http://tools.localhost:18000 |
+| A tool | `http://<tool>.tools.localhost:18000` |
+| Gitea · Keycloak · identity · gateway | `:13000` · `auth.` · `id.` · `:18080` |
 
-`*.localhost` резолвится сам в Chrome и curl; в Safari может не открыться.
+## The four invariants
 
-## Что проверить
+Break one and it stops being a sandbox.
 
-| Что | Как | Что увидите |
-| --- | --- | --- |
-| Тул глазами человека | откройте тул, добавьте задачу, перетащите карточку | каждое изменение сначала показывает, что будет записано; в базе — от вашего имени (`make psql`) |
-| Гейтвей и аудит | `make demo-gateway` | 15 проверок: чужой источник → 403, инъекция → 400, агент не подтверждает запись сам, передеплой отзывает токены; в конце — `audit.calls` |
-| Источник без правки гейтвея | `make demo-connector` | «Поставщики» подключены записью в реестре и сервисом за гейтвеем; важная запись — только после «Подтвердить»; сломанный реестр не применяется |
-| Коннектор глазами агента | `make validate-connector NAME=postgres` | контракт на тестовой системе: состав совпадает с реестром, `describe` ничего не меняет, `apply` меняет только обещанное, секретов в коде нет |
-| Запись через агента | `node infra/demo/mcp-app.ts` | без согласия человека `commit_approved` отклоняется; после «да» — запись, в аудите агент в цепочке и цитата согласия |
-| Контракт допуска в CI | добавьте в `tool.yaml` источник `hr-salaries`, запушьте ветку | прогон падает с объяснением, до деплоя не доходит |
-| CI без привилегий | перепишите в ветке `.gitea/workflows/tools.yml`, чтобы печатал секрет, искал `docker.sock` и ходил в гейтвей | пустой секрет, нет сокета, «недоступен»: выкатывает деплоер, а не CI |
-| Агент собирает тул | «сделай тул, который показывает нагрузку по людям» | `list_sources → scaffold_tool → validate_manifest → deploy_preview` → ссылка на превью → `open_pull_request` |
-| Свой агент у каждого | `make demo-forge` | без ключа 401, без группы `sandbox-developers` 403, дальше токен бота `<логин>-agent`; в `main` бот писать не может; отзыв ключей обрывает и токен |
-| Вход | `make demo-identity` | без сессии Traefik не пускает до тула; личность подписана, чужой заголовок вырезается; отозванный ключ не работает |
-| Группы | `make demo-groups` | группы песочницы заводит администратор, участие бывает срочным, исключение действует на следующем вызове |
-| Кому открыт тул | `make demo-access` | круг задаётся в `access` и меняется на главной без передеплоя; шире `allowed_groups` источника нельзя; посторонний видит «Попросить доступ» |
-| Права внутри тула | `make demo-data-rights` | чувствительные поля приходят пустыми и перечислены в `redacted`, строки фильтруются, охват — в `row_scope` |
-| Уведомления и владельцы | `make demo-notify` | ушёл владелец → решает руководитель, группа → участники, никого → `sandbox-admins`; письма во «Входящих» |
-| Смертность | `make tools`, `make revoke TOOL=…` | заход человека продлевает на `ttl_days`, но не дальше 90 дней от явного продления; 30 дней простоя → уведомление и 7 дней; отзыв → 403 сразу, контейнер убран за ≤ 30 с |
-| Метрики и события | `/metrics`, `/events` | воронка «начат → превью → прод», выживаемость, кто пользуется, отказы с причинами; разбор с фильтрами, срез живёт в адресе |
+1. **Admission contract.** A tool enters only with a valid `tool.yaml`: approved sources, explicit writes, owner,
+   lifetime, who it is open to. CI checks it against `registry/sources.yaml`. Not in the registry — build fails.
+2. **One exit to the data.** No database drivers in the SDK, no route out of the tool network except the
+   gateway, dependency check in CI. The gateway issues a token scoped to the manifest and audits every call.
+3. **One framework.** Auth, data access, deployment, UI come from `packages/*` and `charts/tool-base`. A tool is
+   domain logic only, so platform changes reach every tool without touching them.
+4. **Forced mortality.** Every tool has a TTL. Human use extends it, an agent's calls do not. Idle long enough —
+   the owner is notified, then it is deleted with its resources. Silence counts as "no".
 
-**Путь в прод.** Прямой пуш в `main` отклоняется для всех. Агент пушит ветку ботом своего человека → CI проверяет →
-деплоер выкатывает превью `<тул>--preview` → PR → вы смотрите превью, одобряете и мержите → деплоер выкатывает
-прод. Новые коммиты сбрасывают одобрение, красный CI мерж блокирует. Одобряет команда `platform/approvers`
-(группа `sandbox-approvers` из личности); агент одобрить PR не может — у него нет вашей учётной записи. У тула одно превью; ветка каркаса превьюит тулы, только если
-меняет `packages/`; больше 10 живых превью гейтвей не допустит.
+A human decides twice: approving a source in the registry, and looking at the preview link. Everything between
+is automatic.
 
-**Удаление.** На странице тула и в «Разработчику» — «Удалить» у прод-инстанса и у каждого превью, дальше
-«Убрать код из main → PR». Данные в источниках остаются.
-
-**Агент в репозитории.** Build-time агент (`bin/sandbox-mcp platform`) ходит в Gitea не общей учёткой, а ботом
-своего человека: `bin/sandbox-mcp login` → сервис личности проверяет группу `sandbox-developers` и выдаёт токен
-бота `<логин>-agent` на несколько часов. Пароля Gitea на машине разработчика нет; в Gitea можно войти тем же
-SSO (кнопка «sandbox» на странице входа), а группа `sandbox-approvers` раскладывается в команду `platform/approvers`,
-которая одобряет PR.
-
-**Тул в хосте агента.** `bin/sandbox-mcp login` один раз (ключ в Keychain), дальше `bin/sandbox-mcp tool <имя>` —
-мост stdio ↔ HTTP, он же для Claude Desktop. Ключ принадлежит человеку: одним ключом подключаются все доступные
-тулы, права проверяются на каждом вызове, отзыв в кабинете `/me` действует сразу.
-
-## Как устроено
+## How a tool ships
 
 ```
-агент ──mcp-sandbox──▶ git push ──▶ Gitea Actions: контракт → типы   (без секретов и Docker)
-                                         │ зелёный статус коммита
-                                         ▼
-                              деплоер: своим кодом из main → превью / прод, статус «sandbox / deploy»
-                                                           │
-человек ──▶ Traefik *.tools.localhost ──▶ контейнер тула (сеть tools, без выхода наружу)
-агент (run-time) ──MCP / MCP App──────────▶        │ токен тула + подписанная личность человека
-                                                    ▼
-                                    гейтвей: скоуп по манифесту, права на данные, аудит
-                                                    │  роль БД на источник
-                                                    ▼
-                                    коннектор ──▶ Postgres / внешняя система
-                                                    ▲
-                                    уборщик: истёк TTL / отозван → контейнер удалён
+agent ──scaffold_tool──▶ git push ──▶ CI: contract + types ──▶ deployer ──▶ preview link
+                                      (no secrets, no Docker,        │
+                                       no route to the gateway)      ▼
+                                                        human approves the PR ──▶ production
 ```
 
-## Команды
+## What is actually enforced
 
-| Команда | Что делает |
+| Boundary | By what |
 | --- | --- |
-| `sh infra/setup.sh` / `make setup` | первый запуск: окружение, стенд, здоровье |
-| `make up` / `make down` / `make reset` | поднять / остановить / снести с данными |
-| `make check` | контракт допуска и типы — то же, что CI |
-| `make tools`, `make extend`, `make revoke` | жизненный цикл тулов |
-| `make deploy TOOL=…` | выкатить тул вручную (обычно это делает деплоер) |
-| `make agents` | конфиги MCP для Claude Code, Cursor, OpenCode |
-| `make psql` | консоль Postgres (порт наружу не публикуется) |
-| `make demo-*` | сценарии из таблицы выше |
-| `make migrate` | досоздать схемы и гранты на живом стенде (после обновления платформы) |
-| `make validate-connector NAME=…` | контракт коннектора на его тестовой системе |
-| `make public` | публичный экспорт в `dist/public`: без тулов, секретов и личных данных |
-| `infra/ci-wait.sh [sha]` | дождаться CI и выкатки, показать итог |
+| Source not in the registry | manifest validator, in CI and in the gateway |
+| Tool reaching a database | internal network, no drivers, dependency check |
+| Field the person may not see | gateway blanks it by group, reports it in `redacted` |
+| Rows outside one's scope | row filter from the registry, scope returned in `row_scope` |
+| Any write | explicit permission; UI applies on click, an agent may only prepare and then `commit_approved` with the human's verbatim consent |
+| Who may open a tool | ForwardAuth before the tool, gateway again on the call |
+| Who the caller is | short-lived JWT from the identity service (`sub`, `groups`, `channel`, `aud`) |
+| Living forever | reaper: TTL, auto-extension cap, idle notice, deletion |
+| Pushing to `main` | PR, green CI, human approval |
 
-## Другое устройство, сеть, бэкап
+Every call, allowed or denied, lands in `audit.calls` before the effect — with the actor, the tool, the source,
+the reason, and whether an agent was in the chain.
 
-- **Переезд платформы.** `make bundle` → архив без `tools/`, секретов и истории. На новом устройстве:
-  `tar -xzOf sandbox-platform-<sha>.tar.gz sandbox/infra/install.sh | sh -s -- sandbox-platform-<sha>.tar.gz` —
-  новые секреты, новая история, тулов 0. Тулы не переезжают: у тула владелец, срок и регистрация в своём гейтвее.
-- **Работа с ноутбука.** `make lan HOST=192.168.1.10` открывает стенд в локальную сеть (адреса через sslip.io) и
-  печатает команду, которая делает рабочую копию (`infra/remote.sh`): агент пишет тул у себя, выкатка идёт на
-  стенде. `make local` — обратно. Если роутер режет DNS с частными адресами, поможет SSH-туннель на порты
-  13000/18000/18080/18090.
-- **Бэкап.** Только на внешний диск или NAS (`SANDBOX_BACKUP_DIR`), ключ `~/.config/sandbox/backup.key` — в
-  менеджер паролей. `make backup`, `make backup-verify`, `make backup-schedule`; `make restore FILE=…` запускает
-  только человек в терминале, чужой стенд — с `ADOPT=1`. `.env` в бэкап не попадает.
+Identity is real: Keycloak as the IdP, `infra/identity` for the OIDC flow (PKCE in browsers, device flow for
+agents) and for the signed `X-Sandbox-Identity` header. An agent's MCP key belongs to the human, not to the tool:
+only its prefix and hash are stored, groups are re-read on every call, revocation is immediate. The identity
+carries a channel — from a browser a person may confirm a write, from an agent host they must say yes in chat.
 
-## Что заглушено
+## Layout
 
-- **Вход настоящий**, но Keycloak — в стендовой конфигурации (HTTP, dev-настройки), а справочник сотрудников
-  `registry/directory.yaml` стоит вместо HR/IdP.
-- **Чувствительность поля сама по себе ничего не закрывает** — закрывает `field_groups` источника в реестре.
-- **Знания только дописываются**: исправление — новая запись, удаление — админом через `make psql`.
-- **Уведомления** доходят баннером и во «Входящие»; мессенджер и почта компании — впереди (roadmap, раздел 5).
-- **Секрет тула** передаётся контейнеру переменной окружения и виден в `docker inspect` на хосте.
-- **Код деплоера** и `charts/tool-base` обновляются пересборкой стенда, а не мержем в `main`: ветка не может
-  поменять то, как её выкатывают.
-- **Учётка администратора Gitea** лежит в `.env`; агент с доступом к файлу технически может снять защиту `main` —
-  на стенде это держится на правилах `AGENTS.md`.
-- **npm-реестр** внешний; в корпоративном контуре нужен внутренний зеркальный.
-- **Scale to zero** нет: простаивающий тул работает до удаления.
+```
+registry/      approved sources and the people directory — the two human decisions
+gateway/       the only way to data: scope, data rights, writes, audit, MCP endpoint
+infra/         identity, deployer, reaper, notifier, CI runner, Postgres seed, demos, setup
+packages/      sdk, ui-kit, manifest, connector — what tools and connectors import
+portal/        catalog, tool page, sources, metrics, events, admin
+connectors/    a service per source, behind the gateway
+mcp-sandbox/   MCP server for build-time agents
+templates/     skeletons for a new tool and new connectors
+tools/         empty on purpose — see tools/README.md
+```
+
+## Try the boundaries
+
+```bash
+make demo-gateway       # scope, injections, two-step writes, audit — 15 assertions
+make demo-identity      # sign-in, signed identity, personal MCP keys
+make demo-access        # who may open a tool, and why the gateway says no
+make demo-data-rights   # sensitive fields by group, row filters, writes by group
+make demo-connector     # a second source added by a registry entry, no gateway code
+make check              # admission contract + types, the same checks CI runs
+```
+
+## Limits
+
+Prototype on one host: no Kubernetes, no HA, no real corporate sources yet. Keycloak runs in stand
+configuration, the employee directory is a stub, a tool's secret is visible in `docker inspect` on the host, and
+the Gitea admin account lives in `.env`. Do not point this at real data as is — see [SECURITY.md](SECURITY.md).
+
+[Apache-2.0](LICENSE) · [NOTICE](NOTICE)

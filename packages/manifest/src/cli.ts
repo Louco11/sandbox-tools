@@ -74,7 +74,11 @@ function checkTool(root: string, tool: string, registry: ReturnType<typeof loadR
 }
 
 const root = process.cwd();
-const registry = loadRegistry(join(root, 'registry', 'sources.yaml'));
+// Контракт допуска смотрит на тот же реестр, что и гейтвей: со включённым демо-слоем — вместе с ним.
+const registry = loadRegistry(
+  join(root, 'registry', 'sources.yaml'),
+  process.env.SANDBOX_DEMO === '1' ? join(root, 'registry', 'demo', 'sources.yaml') : undefined,
+);
 // Справочник сотрудников: сломанный гейтвей не применит — ловим раньше, в CI.
 try {
   loadDirectory(join(root, 'registry', 'directory.yaml'));

@@ -46,7 +46,18 @@ mkdir -p "$OUT"
 
 # 1. Файлы платформы: только отслеживаемые git, без тулов и сгенерированных конфигов агентов.
 say "копирую платформу"
+# Системы этого стенда (свой compose-файл, коннекторы и базы его источников) наружу не едут —
+# как и тулы: у источника свой владелец, своя учётка и своё одобрение. Платформа публикуется без них.
+STAND=$(node -e '
+const { loadRegistry } = await import("./packages/manifest/src/index.ts");
+const r = loadRegistry("registry/sources.yaml");
+const names = Object.values(r.sources).map((s) => (s.connector?.url ?? "").replace(/^https?:\/\/connector-/, "").replace(/:\d+$/, ""));
+console.log(names.filter(Boolean).join(" "));
+' --input-type=module 2>/dev/null || true)
+for n in $STAND; do say "система стенда «$n» в экспорт не уедет"; done
+
 FILES=$(git ls-files \
+  | grep -v '^docker-compose\.stand\.yml$' \
   | grep -v '^tools/' \
   | grep -v '^publish/' \
   | grep -v '^\.mcp\.json$' \
@@ -54,6 +65,11 @@ FILES=$(git ls-files \
   | grep -v '^opencode\.json$')
 COUNT=0
 for f in $FILES; do
+  skip=
+  for n in $STAND; do
+    case "$f" in connectors/$n/*|infra/$n-db/*) skip=1 ;; esac
+  done
+  [ -z "$skip" ] || continue
   mkdir -p "$OUT/$(dirname "$f")"
   cp "$f" "$OUT/$f"
   COUNT=$((COUNT + 1))
@@ -76,6 +92,9 @@ cp publish/SECURITY.md publish/LICENSE "$OUT/"
 sed "s/\${YEAR}/$(date +%Y)/; s/internal-tools contributors/${PUBLISH_COPYRIGHT:-internal-tools contributors}/" publish/NOTICE > "$OUT/NOTICE"
 mkdir -p "$OUT/tools"
 cp publish/tools/README.md "$OUT/tools/"
+# Источники стенда наружу не уезжают — как и тулы: у источника свой владелец, учётка и одобрение.
+# В публичном репозитории реестр пуст, а потрогать песочницу можно демо-слоем (registry/demo/).
+cp publish/registry/sources.yaml "$OUT/registry/sources.yaml"
 # GitHub отклоняет пуш с .github/workflows, если у токена нет права `workflow`. Поэтому по умолчанию
 # workflow не уезжает: PUBLISH_WORKFLOWS=1 — когда право выдано (gh auth refresh -h github.com -s workflow).
 if [ "${PUBLISH_WORKFLOWS:-0}" = 1 ]; then
@@ -157,6 +176,8 @@ check "логин человека стенда" "(^|[^a-z0-9._-])${HUMAN}([^a-z
 check "домашние каталоги" "/Users/[A-Za-z0-9._-]+/"
 check "личная почта" "[A-Za-z0-9._%+-]+@(gmail|yandex|mail|outlook|icloud)\.[a-z]+"
 check "приватные ключи" "BEGIN [A-Z ]*PRIVATE KEY"
+SRC=$(node -e 'const {loadRegistry}=await import("./packages/manifest/src/index.ts");const r=loadRegistry(process.argv[1]);console.log(Object.keys(r.sources).length)' --input-type=module "$OUT/registry/sources.yaml" 2>/dev/null || echo '?')
+if [ "$SRC" = 0 ]; then ok "источников стенда в экспорте — нет"; else printf '  \033[31m✗\033[0m в экспорт попали источники стенда: %s\n' "$SRC" >&2; fail=1; fi
 check "присвоенные секреты" "^[A-Z_]{4,}=[A-Za-z0-9+/]{20,}$"
 check "пароли и токены значением" "(password|secret|token|api_key)[\"']?[[:space:]]*[:=][[:space:]]*[\"'][A-Za-z0-9+/_-]{12,}[\"']"
 # Кто подписан под уже опубликованными коммитами: это уезжает в GitHub и видно всем.

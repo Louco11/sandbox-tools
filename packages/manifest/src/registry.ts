@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { parse } from 'yaml';
 import { z } from 'zod';
 
@@ -105,6 +105,25 @@ export function parseRegistry(text: string): Registry {
   return result.data;
 }
 
-export function loadRegistry(path: string): Registry {
-  return parseRegistry(readFileSync(path, 'utf8'));
+/**
+ * Реестр стенда плюс, если включён демо-слой, одобренные демо-источники платформы (`registry/demo/sources.yaml`).
+ * Демо-слой отдельным файлом, чтобы чистый контур был чистым: у нового стенда источников нет вообще, а демо
+ * включается одним выключателем (`SANDBOX_DEMO=1`). Совпадение id — ошибка: демо не подменяет источник стенда.
+ */
+export function loadRegistry(path: string, demoPath?: string): Registry {
+  const own = parseRegistry(readFileSync(path, 'utf8'));
+  if (!demoPath || !existsSync(demoPath)) return own;
+
+  const demo = parseRegistry(readFileSync(demoPath, 'utf8'));
+  for (const id of Object.keys(demo.sources)) {
+    if (own.sources[id]) throw new Error(`демо-источник «${id}» совпадает с источником стенда — переименуйте один из них`);
+  }
+  for (const id of Object.keys(demo.writes)) {
+    if (own.writes[id]) throw new Error(`демо-право записи «${id}» совпадает с правом стенда — переименуйте одно из них`);
+  }
+  return {
+    ...own,
+    sources: { ...own.sources, ...demo.sources },
+    writes: { ...own.writes, ...demo.writes },
+  };
 }

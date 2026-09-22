@@ -1,4 +1,4 @@
-.PHONY: setup stand demo-forge lan local demo-identity demo-groups demo-access demo-data-rights demo-notify demo-connector validate-connector up bundle backup backup-verify backup-schedule restore migrate down reset ps logs psql env demo-gateway ci-image check deploy tools extend revoke agents
+.PHONY: setup stand demo-forge demo-on demo-off demo-status lan local demo-identity demo-groups demo-access demo-data-rights demo-notify demo-connector validate-connector up bundle backup backup-verify backup-schedule restore migrate down reset ps logs psql env demo-gateway ci-image check deploy tools extend revoke agents
 
 # Команды стенда — только на сервере. Рабочая копия из infra/remote.sh стенда не имеет и второй не поднимает.
 stand:
@@ -20,14 +20,21 @@ up: stand env ci-image ## Поднять стенд целиком
 bundle: ## Архив платформы для другого устройства: main без тулов, секретов и истории (infra/install.sh)
 	@./infra/install.sh bundle
 
+demo-on: stand ## Включить демо-слой: демо-источники, их данные и коннекторы
+	@./infra/demo-layer.sh on
+
+demo-off: stand ## Выключить демо-слой: в контуре остаются только источники стенда
+	@./infra/demo-layer.sh off
+
+demo-status: ## Включён ли демо-слой и что сейчас в контуре
+	@./infra/demo-layer.sh
+
 public: ## Публичный экспорт в dist/public: платформа без тулов, секретов и личных данных (не пушит)
 	@./infra/publish.sh
 
 
 migrate: stand env ## Досоздать новые источники и гранты на живом стенде без потери данных (идемпотентно)
 	docker compose up -d --wait postgres
-	docker compose exec -T postgres sh /docker-entrypoint-initdb.d/04-boards.sh
-	docker compose exec -T postgres sh /docker-entrypoint-initdb.d/05-pastry.sh
 	docker compose exec -T postgres sh /docker-entrypoint-initdb.d/06-gateway-grants.sh
 	docker compose exec -T postgres sh /docker-entrypoint-initdb.d/07-tool-history.sh
 	docker compose exec -T postgres sh /docker-entrypoint-initdb.d/08-identity.sh
