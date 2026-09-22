@@ -230,6 +230,18 @@ async function process1(branch: string, sha: string): Promise<void> {
  * токены перестают работать сразу, уборщик удаляет контейнеры и образы. Какие инстансы у ветки —
  * из логов её выкаток: «допуск: … инстанс <имя>, …».
  */
+/**
+ * Ветка превью удалена. Штатно её удаляет автоуборка после мержа PR — это ожидаемо, молчим. Но удалить
+ * ветку `preview/<тул>` может и чужой бот (У2: у ботов repo-write), тогда владелец лишается превью бесшумно.
+ * Отличаем: если у ветки был смерженный PR — штатно; иначе удаление в обход, и владельца надо предупредить.
+ */
+const mergedByBranch = new Map<string, number>();
+async function wasMerged(branch: string): Promise<boolean> {
+  const pulls = await gitea<Array<Pull & { merged: boolean }>>('/pulls?state=closed&limit=50').catch(() => [] as Array<Pull & { merged: boolean }>);
+  for (const p of pulls) if (p.head.ref === branch && p.merged) mergedByBranch.set(branch, p.number);
+  return mergedByBranch.has(branch);
+}
+
 async function dropGoneBranches(alive: Set<string>, why: (branch: string) => string, stale: Map<string, string>): Promise<void> {
   const instancesOf = (d: Deploy) => [...d.log.matchAll(/инстанс (\S+?--\S+?),/g)].map((m) => m[1]!);
   const byBranch = new Map<string, { files: string[]; instances: Set<string> }>();
@@ -267,15 +279,26 @@ async function dropGoneBranches(alive: Set<string>, why: (branch: string) => str
     delete done[branch];
     writeFileSync(DONE_FILE, JSON.stringify(done, null, 2));
     log({ type: 'previews_dropped', branch, reason: why(branch), instances: [...instances] });
-    // Удалённая ветка (обычно после мержа) — это ожидаемо, молчим. Брошенная — стоит сказать автору.
+    const tools = [...new Set([...instances].map((i) => i.split('--')[0]!))];
+    const owners = tools.map(ownerOf).filter((x): x is string => !!x);
     const head = stale.get(branch);
     if (head && instances.size) {
-      const tools = [...new Set([...instances].map((i) => i.split('--')[0]!))];
+      // Брошена: 7 дней без коммитов — говорим автору и владельцу.
       await notify({
-        to: [...(await authorOf(head)), ...tools.map(ownerOf).filter((x): x is string => !!x)],
+        to: [...(await authorOf(head)), ...owners],
         event: 'preview.dropped', key: `preview-dropped:${branch}:${head}`, link: `${GITEA_PUBLIC}/${REPO}/src/branch/${branch}`,
         subject: `Превью ветки ${branch} убрано: ${PREVIEW_STALE_DAYS} дн. без коммитов`,
         text: `Убраны: ${[...instances].join(', ')}. Ветка осталась — новый коммит выкатит превью заново. Не нужна — удалите ветку.`,
+      });
+    } else if (!head && instances.size && !(await wasMerged(branch))) {
+      // Ветку удалили не после мержа — превью снято в обход владельца (У2). Не молчим: говорим владельцу.
+      await notify({
+        to: owners.length ? owners : ['sandbox-admins'],
+        event: 'preview.deleted', key: `preview-deleted:${branch}`, link: `${GITEA_PUBLIC}/${REPO}`,
+        subject: `Превью ${tools.join(', ')} снято: ветку ${branch} удалили`,
+        text: `Убраны: ${[...instances].join(', ')}. PR по этой ветке не мержился — ветку удалили вручную. `
+          + `Если это не вы, скажите администратору: удалить ветку превью может любой бот-разработчик. `
+          + `Вернуть превью — deploy_preview заново.`,
       });
     }
   }
@@ -301,16 +324,37 @@ async function sweep(): Promise<void> {
 
 // ---------- лог выкатки для агента и человека (только чтение) ---------------------------
 
-// Логи тула — для get_logs агента, в том числе с другого устройства. Только по учётке Gitea: логи тулов
-// содержат логины людей и ошибки с данными. Проверка — запрос к Gitea с теми же Basic-учётными данными.
-const authCache = new Map<string, number>();
-async function giteaUser(header: string | undefined): Promise<boolean> {
-  if (!header?.startsWith('Basic ')) return false;
-  if ((authCache.get(header) ?? 0) > Date.now()) return true;
+// Логи тула содержат логины людей и ошибки с данными, поэтому отдаём их не всякому, у кого есть учётка Gitea
+// (У1), а только тому, кому этот тул открыт: владельцу, одобряющим и администратору песочницы. Проверяет
+// гейтвей (тем же canUse, что пускает в сам тул), деплоер лишь спрашивает.
+const authCache = new Map<string, { at: number; login: string }>();
+async function giteaLogin(header: string | undefined): Promise<string | null> {
+  if (!header?.startsWith('Basic ')) return null;
+  const hit = authCache.get(header);
+  if (hit && hit.at > Date.now()) return hit.login;
   const res = await fetch(`${GITEA_URL}/api/v1/user`, { headers: { Authorization: header } }).catch(() => null);
-  if (!res?.ok) return false;
-  authCache.set(header, Date.now() + 60_000);
-  return true;
+  if (!res?.ok) return null;
+  const login = (await res.json().catch(() => null) as { login?: string } | null)?.login ?? null;
+  if (login) authCache.set(header, { at: Date.now() + 60_000, login });
+  return login;
+}
+
+// Бот человека называется <логин>-agent (шаг Б6): за логами стоит его человек, его и спрашиваем у гейтвея.
+const humanOf = (login: string) => (login.endsWith('-agent') ? login.slice(0, -'-agent'.length) : login);
+
+const accessCache = new Map<string, { at: number; ok: boolean }>();
+async function mayReadLogs(login: string, instance: string): Promise<boolean> {
+  // Инстанс превью <тул>--<ветка>: доступ решается по самому тулу, как и в гейтвее.
+  const tool = instance.split('--')[0]!;
+  const human = humanOf(login);
+  const key = `${human}\u0000${tool}`;
+  const hit = accessCache.get(key);
+  if (hit && hit.at > Date.now()) return hit.ok;
+  const url = `${GATEWAY_URL}/v1/admin/access-check?instance=${encodeURIComponent(tool)}&login=${encodeURIComponent(human)}&channel=mcp`;
+  const res = await fetch(url, { headers: { Authorization: `Bearer ${DEPLOY_TOKEN}` } }).catch(() => null);
+  const ok = res?.ok ? ((await res.json().catch(() => ({}))) as { allowed?: boolean }).allowed === true : false;
+  accessCache.set(key, { at: Date.now() + 30_000, ok });
+  return ok;
 }
 
 function toolLogs(instance: string, lines: number): { state: string; logs: string } | null {
@@ -334,8 +378,13 @@ http
     const url = new URL(req.url ?? '/', 'http://deployer');
     const logsMatch = url.pathname.match(/^\/logs\/([a-z0-9][a-z0-9-]{0,80})$/);
     if (logsMatch) {
-      if (!(await giteaUser(req.headers.authorization))) {
+      const login = await giteaLogin(req.headers.authorization);
+      if (!login) {
         json(401, { error: 'unauthorized', message: 'нужна учётная запись Gitea (Basic)' });
+        return;
+      }
+      if (!(await mayReadLogs(login, logsMatch[1]!))) {
+        json(403, { error: 'forbidden', message: `логи тула ${logsMatch[1]} видит только тот, кому он открыт (владелец, одобряющие, администратор)` });
         return;
       }
       const lines = Math.min(Math.max(Number(url.searchParams.get('lines')) || 100, 10), 500);

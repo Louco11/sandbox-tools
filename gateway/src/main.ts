@@ -313,7 +313,7 @@ app.put('/v1/admin/tools/:name/access', route(async (req, res) => {
 
 /** Может ли человек открыть этот инстанс — для ForwardAuth: отказ должен случиться до тула. */
 app.get('/v1/admin/access-check', route(async (req, res) => {
-  requireAdmin(req, 'groups.read');
+  requireAdmin(req, 'access.check');
   const instance = String(req.query.instance ?? '');
   const actor = parseActor(String(req.query.login ?? ''));
   if (!instance || !actor) throw badRequest('нужны instance и login');
@@ -329,7 +329,7 @@ app.get('/v1/admin/access-check', route(async (req, res) => {
 
 /** Что из списка доступно человеку — для каталога на главной: показываем только его тулы. */
 app.post('/v1/admin/access-check', route(async (req, res) => {
-  requireAdmin(req, 'groups.read');
+  requireAdmin(req, 'access.check');
   const actor = parseActor(String(req.body?.login ?? ''));
   const instances = Array.isArray(req.body?.instances) ? req.body.instances.map(String).slice(0, 200) : [];
   if (!actor) throw badRequest('нужен login');
