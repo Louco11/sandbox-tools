@@ -1,4 +1,4 @@
 {
   "extends": "./tsconfig.base.json",
-  "include": ["packages/*/src", "gateway/src", "tools/*/src", "tools/*/ui", "mcp-sandbox/src", "charts/tool-base", "infra/reaper", "infra/deployer", "infra/notifier", "infra/backup", "connectors", "infra/mcp-bridge.ts", "infra/agents", "portal/src"]
+  "include": ["packages/*/src", "gateway/src", "tools/*/src", "tools/*/ui", "mcp-sandbox/src", "charts/tool-base", "infra/reaper", "infra/deployer", "infra/notifier", "infra/backup", "connectors", "infra/identity/src", "infra/mcp-bridge.ts", "infra/agents", "portal/src"]
 }

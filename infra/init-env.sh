@@ -74,6 +74,15 @@ ensure NOTIFY_PORTAL_TOKEN "$(secret 24)"    # главная: входящие 
 ensure CARS_DB_PASSWORD "$(secret)"
 ensure CARS_READ_PASSWORD "$(secret)"
 ensure CONNECTOR_CARS_TOKEN "$(secret 20)"
+ensure CONNECTOR_HOLST_TOKEN "$(secret 20)"
+ensure CONNECTOR_PETSTORE_TOKEN "$(secret 20)"
+# Petstore — публичный demo API. Holst MCP на хосте: 127.0.0.1:47641 → контейнер ходит через holst-proxy.
+ensure PETSTORE_API_URL "https://petstore.swagger.io/v2"
+ensure PETSTORE_API_TOKEN "special-key"
+ensure HOLST_MCP_URL "http://holst-proxy/mcp"
+# HOLST_MCP_URL=  (пусто) — фикстура вместо живого Holst
+# Портал просит у сервиса личности доступ к репозиторию от имени человека, нажавшего кнопку (Ч5).
+ensure IDENTITY_PORTAL_TOKEN "$(secret 20)"
 ensure GITEA_OIDC_SECRET "$(secret 24)"
 ensure GITEA_DEPLOYER_USER sandbox-deployer
 ensure GITEA_DEPLOYER_PASSWORD "$(secret 16)"

@@ -338,6 +338,7 @@ services:
       NOTIFY_REAPER_TOKEN: ${NOTIFY_REAPER_TOKEN:?run make env}
       NOTIFY_DEPLOYER_TOKEN: ${NOTIFY_DEPLOYER_TOKEN:?run make env}
       NOTIFY_PORTAL_TOKEN: ${NOTIFY_PORTAL_TOKEN:?run make env}
+      IDENTITY_PORTAL_TOKEN: ${IDENTITY_PORTAL_TOKEN:?run make env}
     volumes:
       - ./infra/notifier:/notifier:ro
       - notifier-state:/state
@@ -439,6 +440,10 @@ services:
       GITEA_ADMIN_PASSWORD: ${GITEA_ADMIN_PASSWORD:?run make env}
       GITEA_PUBLIC_URL: http://${SANDBOX_HOST:-localhost}:13000
       GITEA_OIDC_SECRET: ${GITEA_OIDC_SECRET:-}
+      # Портал приходит сюда от имени человека: PR открывает бот того, кто нажал кнопку (Ч5).
+      IDENTITY_PORTAL_TOKEN: ${IDENTITY_PORTAL_TOKEN:?run make env}
+      # Стендовая дверь: подпись личности в обход входа (mint.ts). 0 — закрыть, тогда только настоящий вход.
+      IDENTITY_ALLOW_MINT: ${IDENTITY_ALLOW_MINT:-1}
       FORGE_TOKEN_HOURS: ${FORGE_TOKEN_HOURS:-4}
     volumes:
       - ./registry:/registry:ro

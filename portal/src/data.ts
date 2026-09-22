@@ -4,7 +4,7 @@
  * git рабочей копии — смонтирована read-only. Прав на данные источников у главной нет.
  */
 import { spawnSync } from 'node:child_process';
-import { DOMAIN, GATEWAY_URL, GITEA_AUTH, GITEA_URL, IDENTITY_URL, NOTIFIER_URL, NOTIFY_TOKEN, PORTAL_TOKEN, PUBLIC_PORT, REPO, WORKTREE } from './config.ts';
+import { DOMAIN, GATEWAY_URL, GITEA_AUTH, IDENTITY_TOKEN, GITEA_URL, IDENTITY_URL, NOTIFIER_URL, NOTIFY_TOKEN, PORTAL_TOKEN, PUBLIC_PORT, REPO, WORKTREE } from './config.ts';
 
 
 export interface GatewayTool {
@@ -30,10 +30,26 @@ export interface Pull {
 export interface Review { user: { login: string }; state: string; stale?: boolean; dismissed?: boolean }
 export interface Manifest { owner: string; ttl_days: number; sources: string[]; writes: string[]; started_at: string | null }
 
-export async function gitea<T>(path: string, init?: { method: string; body: unknown }): Promise<T> {
+/**
+ * Доступ к репозиторию от имени человека (шаг Б6, починка Ч5): сервис личности выдаёт токен его бота
+ * `<логин>-agent`. Раньше портал писал общей учётной записью, пароль которой лежит в `.env` стенда, —
+ * и в истории репозитория было не разобрать, кто на самом деле нажал кнопку.
+ */
+export async function forgeAs(identity: string): Promise<string> {
+  const res = await fetch(`${IDENTITY_URL}/forge/token`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${IDENTITY_TOKEN}`, 'X-Sandbox-Identity': identity },
+    signal: AbortSignal.timeout(15_000),
+  });
+  const body = (await res.json().catch(() => ({}))) as { error?: string; user?: string; token?: string };
+  if (!res.ok || !body.user || !body.token) throw new Error(body.error ?? `сервис личности: ${res.status}`);
+  return Buffer.from(`${body.user}:${body.token}`).toString('base64');
+}
+
+export async function gitea<T>(path: string, init?: { method: string; body: unknown; auth?: string }): Promise<T> {
   const res = await fetch(`${GITEA_URL}/api/v1/repos/${REPO}${path}`, {
     method: init?.method ?? 'GET',
-    headers: { Authorization: `Basic ${GITEA_AUTH}`, 'Content-Type': 'application/json' },
+    headers: { Authorization: `Basic ${init?.auth ?? GITEA_AUTH}`, 'Content-Type': 'application/json' },
     body: init ? JSON.stringify(init.body) : undefined,
   });
   if (!res.ok) throw new Error(`Gitea ${path}: ${res.status} ${init ? await res.text().catch(() => '') : ''}`.trim());

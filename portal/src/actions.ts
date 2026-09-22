@@ -5,7 +5,7 @@
  */
 import { render as renderAgentConfigs } from '../../infra/agents/sync.ts';
 import { GATEWAY_URL, PORTAL_TOKEN } from './config.ts';
-import { gatewayTools, gitea, mainTools } from './data.ts';
+import { forgeAs, gatewayTools, gitea, mainTools } from './data.ts';
 
 /** Заголовки решения человека: токен роли главной плюс его подписанная личность, как её выдал identity. */
 const asPerson = (actor: Person, extra: Record<string, string> = {}) => ({
@@ -39,7 +39,8 @@ export interface TreeEntry { path: string; type: string; sha: string }
 
 /**
  * PR, убирающий тул из main: одним коммитом удаляет tools/<тул>, чистит package-lock и пересобирает
- * конфиги агентов. Коммит и PR — от sandbox-agent; мержит, как обычно, человек после одобрения.
+ * конфиги агентов. Коммит и PR — от бота того, кто нажал кнопку (`<логин>-agent`), а не общей учётной
+ * записью: в истории репозитория видно, чьё это решение. Мержит, как обычно, человек после одобрения.
  */
 export async function openRemovalPr(actor: Person, tool: string): Promise<string> {
   const main = await mainTools();
@@ -78,15 +79,17 @@ export async function openRemovalPr(actor: Person, tool: string): Promise<string
     if (cur) update(path, cur.sha, `${JSON.stringify(content, null, 2)}\n`);
   }
 
+  if (!actor.identity) throw new Error('нет подписанной личности — войдите заново');
+  const auth = await forgeAs(actor.identity);
   await gitea('/contents', {
-    method: 'POST',
+    method: 'POST', auth,
     body: { branch: 'main', new_branch: branch, message: `Удалить тул ${tool}\n\nПо решению владельца ${actor} (главная страница песочницы).`, files },
   });
   const pr = await gitea<{ number: number; html_url: string }>('/pulls', {
-    method: 'POST',
+    method: 'POST', auth,
     body: {
       head: branch, base: 'main', title: `Удалить тул ${tool}`,
-      body: `Владелец **${actor}** удаляет тул \`${tool}\` с главной страницы песочницы.\n\nУбирается \`tools/${tool}/\`, его записи в \`package-lock.json\` и MCP-сервер \`sandbox-${tool}\` из конфигов агентов. Данные в источниках не затрагиваются.\n\nОткрыто агентом по запросу владельца. Мерж — после одобрения человеком и зелёного CI.`,
+      body: `Владелец **${actor}** удаляет тул \`${tool}\` с главной страницы песочницы.\n\nУбирается \`tools/${tool}/\`, его записи в \`package-lock.json\` и MCP-сервер \`sandbox-${tool}\` из конфигов агентов. Данные в источниках не затрагиваются.\n\nОткрыто ботом владельца по его решению на главной. Мерж — после одобрения человеком и зелёного CI.`,
     },
   });
   return `Открыт PR #${pr.number} на удаление кода ${tool} из main: ${pr.html_url}`;

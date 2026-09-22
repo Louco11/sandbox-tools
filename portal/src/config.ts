@@ -16,3 +16,5 @@ export const IDENTITY_HEADER = 'x-sandbox-identity';
 export const IDENTITY_URL = process.env.IDENTITY_URL ?? 'http://identity:8080';
 export const NOTIFIER_URL = process.env.NOTIFIER_URL ?? 'http://notifier:8080';
 export const NOTIFY_TOKEN = process.env.NOTIFY_PORTAL_TOKEN ?? '';
+/** Токен к сервису личности: им портал просит доступ к репозиторию от имени человека, нажавшего кнопку (Ч5). */
+export const IDENTITY_TOKEN = process.env.IDENTITY_PORTAL_TOKEN ?? '';

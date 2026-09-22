@@ -35,6 +35,8 @@ const DIRECTORY_PATH = process.env.DIRECTORY_PATH ?? '/registry/directory.yaml';
 const HUMAN = process.env.SANDBOX_HUMAN || 'ivan.petrov';
 const GATEWAY_URL = process.env.GATEWAY_URL ?? 'http://gateway:8080';
 const GATEWAY_TOKEN = process.env.GATEWAY_IDENTITY_TOKEN ?? '';
+/** Токен портала: с ним портал просит доступ к репозиторию от имени человека, который нажал кнопку (Ч5). */
+const PORTAL_TOKEN = process.env.IDENTITY_PORTAL_TOKEN ?? '';
 const SESSION_HOURS = Number(process.env.IDENTITY_SESSION_HOURS ?? 8);
 /** Личность живёт минуты: украденный заголовок бесполезен почти сразу. */
 const IDENTITY_TTL = process.env.IDENTITY_TOKEN_TTL ?? '2m';
@@ -350,25 +352,43 @@ async function devicePoll(req: http.IncomingMessage, res: http.ServerResponse) {
  */
 async function forgeApi(req: http.IncomingMessage, res: http.ServerResponse) {
   const bearer = (req.headers.authorization ?? '').replace(/^Bearer /i, '').trim();
-  const key = bearer
-    ? await checkKey(bearer, { agent: req.headers['user-agent'], ip: (req.headers['x-forwarded-for'] as string | undefined)?.split(',')[0]?.trim() })
-    : null;
-  if (!key) {
-    return json(res, 401, { error: 'нужен личный ключ MCP: bin/sandbox-mcp login' });
+
+  // Два пути к одному и тому же боту человека:
+  //   * агент приходит с личным ключом — тогда нужна группа sandbox-developers;
+  //   * портал приходит со своим служебным токеном и подписанной личностью того, кто нажал кнопку, —
+  //     право нажать портал проверил сам (владелец тула), и PR откроется ботом этого человека, а не общей
+  //     учётной записью. Без этого пути пришлось бы держать на стенде учётку, которой пишет кто угодно (Ч5).
+  let owner: string | null = null;
+  let how = '';
+  if (PORTAL_TOKEN && bearer === PORTAL_TOKEN) {
+    // Личность проверяем подписью, а не на слово: заголовок ставит Traefik, аудитория — сам портал.
+    const header = (req.headers['x-sandbox-identity'] as string | undefined) ?? '';
+    const person = header ? await verify(header, 'portal').then((r) => r.payload.sub, () => null) : null;
+    if (!person) return json(res, 401, { error: 'портал не передал подписанную личность человека' });
+    owner = person;
+    how = 'портал, от имени человека';
+  } else {
+    const key = bearer
+      ? await checkKey(bearer, { agent: req.headers['user-agent'], ip: (req.headers['x-forwarded-for'] as string | undefined)?.split(',')[0]?.trim() })
+      : null;
+    if (!key) return json(res, 401, { error: 'нужен личный ключ MCP: bin/sandbox-mcp login' });
+    const groups = await freshGroups(key.owner);
+    if (!groups.includes(DEVELOPERS)) {
+      await auditKey({ actor: key.owner, operation: 'forge.token', allowed: false, reason: `нет группы ${DEVELOPERS}` });
+      return json(res, 403, {
+        error: `собирать тулы агентом может тот, кто состоит в группе ${DEVELOPERS}. Попросите администратора песочницы добавить вас`,
+      });
+    }
+    owner = key.owner;
+    how = `ключ ${key.prefix}`;
   }
-  const groups = await freshGroups(key.owner);
-  if (!groups.includes(DEVELOPERS)) {
-    await auditKey({ actor: key.owner, operation: 'forge.token', allowed: false, reason: `нет группы ${DEVELOPERS}` });
-    return json(res, 403, {
-      error: `собирать тулы агентом может тот, кто состоит в группе ${DEVELOPERS}. Попросите администратора песочницы добавить вас`,
-    });
-  }
+
   try {
-    const token = await forgeToken(key.owner);
-    await auditKey({ actor: key.owner, operation: 'forge.token', allowed: true, reason: `агент ${token.user}, ключ ${key.prefix}` });
-    return json(res, 200, { ...token, owner: key.owner, hours: FORGE_TOKEN_HOURS });
+    const token = await forgeToken(owner);
+    await auditKey({ actor: owner, operation: 'forge.token', allowed: true, reason: `агент ${token.user}, ${how}` });
+    return json(res, 200, { ...token, owner, hours: FORGE_TOKEN_HOURS });
   } catch (e) {
-    await auditKey({ actor: key.owner, operation: 'forge.token', allowed: false, reason: (e as Error).message });
+    await auditKey({ actor: owner, operation: 'forge.token', allowed: false, reason: (e as Error).message });
     return json(res, 502, { error: (e as Error).message });
   }
 }

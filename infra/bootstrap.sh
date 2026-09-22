@@ -63,13 +63,15 @@ collaborator() {
   api -X PUT "$GITEA/api/v1/repos/$ORG/$REPO/collaborators/$1" -d '{"permission":"write"}' >/dev/null
 }
 
-echo "→ агент $GITEA_AGENT_USER: пушит ветки и открывает PR, в main не пишет"
+# Учётка агента осталась служебной: ею главная читает состояние репозитория. Писать ею нельзя — пароль лежит
+# в .env стенда, а значит доступен любому агенту (Ч5). Ветки и PR — только личные боты <логин>-agent (шаг Б6).
+echo "→ агент $GITEA_AGENT_USER: только чтение (ветки и PR открывают личные боты)"
 if ! user_exists "$GITEA_AGENT_USER"; then
   docker compose exec -T -u git gitea gitea admin user create \
     --username "$GITEA_AGENT_USER" --password "$GITEA_AGENT_PASSWORD" \
     --email agent@sandbox.local --must-change-password=false >/dev/null
 fi
-collaborator "$GITEA_AGENT_USER"
+api -X PUT "$GITEA/api/v1/repos/$ORG/$REPO/collaborators/$GITEA_AGENT_USER" -d '{"permission":"read"}' >/dev/null
 
 echo "→ деплоер $GITEA_DEPLOYER_USER: читает коммиты и пишет статус выкатки"
 if ! user_exists "$GITEA_DEPLOYER_USER"; then
